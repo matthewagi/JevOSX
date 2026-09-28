@@ -111,16 +111,14 @@ class AXNode:
         return {name: _convert(value) for name, value in zip(attributes, values, strict=False)}
 
     def children(self, attribute: str = "AXChildren", limit: int | None = None) -> list[AXNode]:
-        if limit is None:
-            value = self.get(attribute)
-        else:
-            err, value = _AS.AXUIElementCopyAttributeValues(self.ref, attribute, 0, int(limit), None)
-            if err == AX_INVALID_UI_ELEMENT:
-                raise StaleElementError(f"element vanished while reading {attribute}")
-            value = _convert(value) if err == AX_SUCCESS else None
+        # A plain attribute read, then slice. The ranged AXUIElementCopyAttributeValues call is not implemented
+        # by every app (Chrome returned nothing for its windows), and huge tables/lists are read through
+        # AXVisibleRows/AXVisibleChildren by the walker anyway.
+        value = self.get(attribute)
         if not value:
             return []
-        return [v for v in value if isinstance(v, AXNode)]
+        nodes = [v for v in value if isinstance(v, AXNode)]
+        return nodes[:limit] if limit is not None else nodes
 
     def actions(self) -> tuple[str, ...]:
         err, names = _AS.AXUIElementCopyActionNames(self.ref, None)

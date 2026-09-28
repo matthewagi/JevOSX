@@ -77,7 +77,8 @@ TEXT_INPUT_ROLES = frozenset({"AXTextField", "AXTextArea", "AXComboBox"})
 # Generic roles that are only indexed when they expose AXPress (costs one extra IPC, so only when labelled).
 PROBE_ROLES = frozenset({"AXImage", "AXGroup", "AXCell"})
 TEXT_ROLES = frozenset({"AXStaticText"})
-SKIP_ROLES = frozenset({"AXScrollBar", "AXValueIndicator", "AXSplitter", "AXGrowArea", "AXMenuBar", "AXUnknown"})
+# AXUnknown is deliberately not skipped: Chrome and Electron use it for plain containers that hold real controls.
+SKIP_ROLES = frozenset({"AXScrollBar", "AXValueIndicator", "AXSplitter", "AXGrowArea", "AXMenuBar"})
 SKIP_SUBROLES = frozenset({"AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"})
 LEAF_ROLES = frozenset(
     {

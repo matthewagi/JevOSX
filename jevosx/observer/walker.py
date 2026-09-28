@@ -141,6 +141,7 @@ class WalkResult:
     truncated: bool
     elapsed_ms: float
     notes: list[str] = field(default_factory=list)
+    skipped: dict[str, int] = field(default_factory=dict)  # why subtrees were pruned (diagnostics)
 
 
 @dataclass(slots=True)
@@ -219,6 +220,10 @@ class TreeWalker:
         visited = 0
         truncated = False
         notes: list[str] = []
+        skipped: dict[str, int] = {}
+
+        def skip(reason: str) -> None:
+            skipped[reason] = skipped.get(reason, 0) + 1
 
         stack: list[_Frame] = [
             _Frame(node, 0, -1, container, clip, None, False, False) for node, container in reversed(roots)
@@ -233,15 +238,18 @@ class TreeWalker:
             node_id = visited
             try:
                 attrs = frame.node.get_many(BATCH_ATTRS)
-            except StaleElementError:
+            except StaleElementError as exc:
+                skip("no_response" if "did not respond" in str(exc) else "vanished")
                 continue
             role = str(attrs.get("AXRole") or "")
             subrole = attrs.get("AXSubrole")
             subrole = str(subrole) if subrole else None
             if role in SKIP_ROLES or subrole in SKIP_SUBROLES or attrs.get("AXHidden") is True:
+                skip("hidden" if attrs.get("AXHidden") is True else "skipped_role")
                 continue  # hidden or chrome-only: prune the whole subtree
             rect = frame_of(attrs)
             if rect is not None and not rect.empty and frame.clip is not None and not rect.intersects(frame.clip):
+                skip("offscreen")
                 continue  # entirely outside the visible region: prune the whole subtree
             zero_size = rect is not None and rect.empty  # collapsed/invisible: never indexed as a control
 
@@ -339,6 +347,7 @@ class TreeWalker:
             try:
                 kids = self._children(frame.node, role)
             except StaleElementError:
+                skip("children_unreadable")
                 continue
             if len(kids) >= limits.max_children:
                 truncated = True
@@ -371,6 +380,7 @@ class TreeWalker:
             truncated=truncated,
             elapsed_ms=round((self.clock() - started) * 1000, 1),
             notes=notes,
+            skipped=skipped,
         )
 
     # ------------------------------------------------------------------------------------------------------------

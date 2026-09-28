@@ -151,6 +151,7 @@ class MacDesktopObserver:
             "menus_truncated": menus_truncated,
             "walk_ms": walk.elapsed_ms,
             "notes": walk.notes,
+            "skipped": walk.skipped,
         }
         obs = Observation(
             app=app,

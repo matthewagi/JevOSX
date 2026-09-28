@@ -520,7 +520,7 @@ class Agent:
                 "offered": list(decision.operation_answer.probabilities),
                 "focused": obs.focused_element.describe() if obs.focused_element else None,
                 "elements": [e.describe() for e in obs.elements[:30]],
-                "observe": {k: obs.stats.get(k) for k in ("visited", "walk_ms", "truncated", "notes")},
+                "observe": {k: obs.stats.get(k) for k in ("visited", "walk_ms", "truncated", "notes", "skipped")},
             }
         )
         return resolution

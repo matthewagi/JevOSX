@@ -138,3 +138,16 @@ def test_focusable_text_field_is_typeable_but_plain_label_is_not():
     )
     result = TreeWalker().walk([(root, None)])
     assert [(e.label, e.ops) for e in result.elements] == [("Address and search bar", ("TYPE_TEXT", "CLICK"))]
+
+
+def test_walk_reports_why_subtrees_were_skipped():
+    root = window(
+        FakeNode("AXButton", Title="Gone", stale=True),
+        FakeNode("AXGroup", Hidden=True, children=[FakeNode("AXButton", Title="Inside hidden")]),
+        FakeNode("AXButton", Title="Far away", frame=(5000, 5000, 50, 20)),
+        FakeNode("AXScrollBar"),
+        FakeNode("AXButton", Title="Visible", frame=(10, 10, 50, 20)),
+    )
+    result = TreeWalker().walk([(root, None)])
+    assert [e.label for e in result.elements] == ["Visible"]
+    assert result.skipped == {"vanished": 1, "hidden": 1, "offscreen": 1, "skipped_role": 1}

@@ -334,7 +334,7 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
     except JevOSXError as exc:
         print(f"observe failed: {exc}")
         return 1
-    keys = ("visited", "elements", "menu_items", "truncated", "menus_truncated", "walk_ms", "notes")
+    keys = ("visited", "elements", "menu_items", "truncated", "menus_truncated", "walk_ms", "notes", "skipped")
     stats = {k: obs.stats.get(k) for k in keys}
     print(f"walker: {stats} (observe {ms:.0f} ms)")
     focused = obs.focused_element.describe() if obs.focused_element else None

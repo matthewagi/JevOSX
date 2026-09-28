@@ -107,9 +107,12 @@ class AXNode:
         if err == AX_API_DISABLED:
             raise AccessibilityPermissionError("Accessibility API is disabled for this process")
         if err == AX_CANNOT_COMPLETE:
-            # The app did not answer within the messaging timeout. Retrying attribute by attribute would multiply
-            # the wait (one timeout per attribute), so skip this element instead.
-            raise StaleElementError("app did not respond to the batch read in time")
+            # Either the app timed out or it does not support the batch call right now. One cheap probe decides:
+            # if a single read also fails, skip the element (retrying per attribute would multiply the timeout);
+            # otherwise fall through to per-attribute reads.
+            probe, _ = self.read("AXRole")
+            if probe != AX_SUCCESS:
+                raise StaleElementError(f"app did not respond (AXError {probe})")
         if err != AX_SUCCESS or values is None:
             return {name: self.get(name) for name in attributes}
         return {name: _convert(value) for name, value in zip(attributes, values, strict=False)}

@@ -8,14 +8,13 @@ import logging
 import platform
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .config import Settings
 from .errors import JevOSXError
-from .types import Action, Observation
+from .types import Action
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,6 +72,13 @@ def build_parser() -> argparse.ArgumentParser:
     observe.add_argument("--goal", default="(inspect only)", help="goal to embed in --json questions")
     observe.set_defaults(handler=cmd_observe)
 
+    ui = sub.add_parser("ui", help="open the local web console: type commands, watch and approve steps")
+    ui.add_argument("--demo", action="store_true", help="simulated Mac + simulated decisions (any OS, no API key)")
+    ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
+    ui.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
+    ui.set_defaults(handler=cmd_ui)
+
     doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
     doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
     doctor.set_defaults(handler=cmd_doctor)
@@ -107,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 # ---- run ---------------------------------------------------------------------------------------------------------
 def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
-    from .agent import Agent
+    from .agent import Agent, expect_text_verifier
 
     slots = parse_slots(args.slot)
     interactive = sys.stdin.isatty()
@@ -129,7 +135,7 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
 
     verifier = None
     if args.expect_text:
-        verifier = text_verifier(args.expect_text)
+        verifier = expect_text_verifier(args.expect_text)
 
     if args.delay:
         print(f"starting in {args.delay:.1f}s…")
@@ -145,7 +151,7 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
             ):
                 print(format_event(event))
                 if trace:
-                    trace.write(json.dumps(event_json(event), ensure_ascii=False) + "\n")
+                    trace.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
             result = agent.last_result
             assert result is not None
             print(
@@ -173,17 +179,6 @@ def parse_slots(values: list[str]) -> dict[str, str]:
     return slots
 
 
-def text_verifier(expected: str) -> Callable[[Observation], bool]:
-    needle = expected.lower()
-
-    def verify(obs: Observation) -> bool:
-        haystack = [obs.text, obs.window.title if obs.window else ""]
-        haystack += [f"{e.label} {e.value or ''}" for e in obs.elements]
-        return any(needle in (h or "").lower() for h in haystack)
-
-    return verify
-
-
 def format_event(event: Any) -> str:
     decision = event.decision or {}
     parts = [f"  {event.step:>2} {event.status:<14} {event.action or ''}"]
@@ -196,20 +191,6 @@ def format_event(event: Any) -> str:
     if event.message:
         parts.append(event.message)
     return " · ".join(parts)
-
-
-def event_json(event: Any) -> dict[str, Any]:
-    return {
-        "step": event.step,
-        "status": event.status,
-        "action": event.action,
-        "decision": event.decision,
-        "result": None if event.result is None else vars(event.result),
-        "hints": event.hints,
-        "observation": event.observation,
-        "timings": event.timings,
-        "message": event.message,
-    }
 
 
 # ---- observe -----------------------------------------------------------------------------------------------------
@@ -244,6 +225,13 @@ def cmd_observe(args: argparse.Namespace, settings: Settings) -> int:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     print(f"// state {state_size(state)} bytes · {len(questions)} choice questions", file=sys.stderr)
     return 0
+
+
+# ---- ui ----------------------------------------------------------------------------------------------------------
+def cmd_ui(args: argparse.Namespace, settings: Settings) -> int:
+    from .ui import serve
+
+    return serve(settings, demo=args.demo, host=args.host, port=args.port, open_browser=not args.no_browser)
 
 
 # ---- doctor ------------------------------------------------------------------------------------------------------

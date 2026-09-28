@@ -3,7 +3,7 @@ import json
 import pytest
 
 from jevosx.agent import Agent
-from jevosx.cli import text_verifier
+from jevosx.agent import expect_text_verifier as text_verifier
 from jevosx.config import Settings
 from jevosx.errors import StaleElementError
 from jevosx.executor.keys import key_vocabulary

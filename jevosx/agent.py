@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Generator, Mapping
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +75,19 @@ class StepEvent:
     timings: dict[str, float] = field(default_factory=dict)
     message: str = ""
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "step": self.step,
+            "status": self.status,
+            "action": self.action,
+            "decision": self.decision,
+            "result": None if self.result is None else asdict(self.result),
+            "hints": self.hints,
+            "observation": self.observation,
+            "timings": self.timings,
+            "message": self.message,
+        }
+
 
 @dataclass
 class RunResult:
@@ -89,6 +102,29 @@ class RunResult:
     @property
     def ok(self) -> bool:
         return self.status in ("success", "done")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "goal": self.goal,
+            "steps": self.steps,
+            "episode_id": self.episode_id,
+            "elapsed_ms": self.elapsed_ms,
+            "message": self.message,
+            "ok": self.ok,
+        }
+
+
+def expect_text_verifier(expected: str) -> Verifier:
+    """DONE is only accepted when `expected` is visible (text, window title, element labels or values)."""
+    needle = expected.lower()
+
+    def verify(obs: Observation) -> bool:
+        haystack = [obs.text, obs.window.title if obs.window else ""]
+        haystack += [f"{e.label} {e.value or ''}" for e in obs.elements]
+        return any(needle in (h or "").lower() for h in haystack)
+
+    return verify
 
 
 @dataclass
@@ -129,6 +165,7 @@ class Agent:
         self.sleep = sleep
         self.clock = clock
         self.last_result: RunResult | None = None
+        self.last_observation: Observation | None = None
 
     @classmethod
     def from_settings(
@@ -193,7 +230,7 @@ class Agent:
         text_slots: Mapping[str, str] | None = None,
         max_steps: int | None = None,
         verifier: Verifier | None = None,
-    ) -> Iterator[StepEvent]:
+    ) -> Generator[StepEvent, None, None]:
         goal = goal.strip()
         if not goal:
             raise ValueError("goal must not be empty")
@@ -229,6 +266,7 @@ class Agent:
                 t0 = self.clock()
                 try:
                     obs = self.observer.observe()
+                    self.last_observation = obs
                 except StaleElementError as exc:
                     stale += 1
                     if stale > cfg.max_stale_retries:

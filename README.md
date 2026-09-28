@@ -101,7 +101,11 @@ jevosx/
 ├── agent.py             # the loop: observe → recall → decide → gate → guard → act → settle → learn
 ├── config.py            # typed settings (TOML + .env + environment), strict validation
 ├── types.py             # shared data model (UIElement, Observation, Action, …)
-└── cli.py               # `jevosx run | observe | doctor | memory`
+├── ui/                  # local web console (`jevosx ui`)
+│   ├── server.py        #   stdlib HTTP + Server-Sent Events, run manager, approvals, token/Host guards
+│   ├── demo.py          #   simulated Mac + simulated decisions for `--demo`
+│   └── static/          #   single-file front end (no external resources)
+└── cli.py               # `jevosx run | observe | ui | doctor | memory`
 examples/                # run_agent.py (Python API), dump_tree.py (inspect what the agent sees)
 config/                  # jevosx.example.toml: every setting with its default
 scripts/bootstrap.sh     # venv + install + doctor
@@ -212,6 +216,7 @@ scripts/bootstrap.sh              # creates .venv, installs deps (incl. pyobjc),
 $EDITOR .env                      # set TYPESAFE_API_KEY=...
 source .venv/bin/activate
 jevosx doctor --live              # checks permissions and measures a real Jev round trip
+jevosx ui                         # open the console and start giving commands
 ```
 
 Manual install:
@@ -232,6 +237,33 @@ and `AXEnhancedUserInterface` (Chrome, Edge, Brave, Arc…) so their web content
 exposes web content natively. The first observation after an app launches can be sparse while the tree builds.
 
 ## Usage
+
+### Console (web UI)
+
+```bash
+jevosx ui            # opens http://127.0.0.1:8765 in your browser and drives your real Mac
+jevosx ui --demo     # simulated Mac + simulated decisions: try the whole loop on any OS, no API key
+```
+
+A chat-style console for giving the agent commands:
+
+- **Command box.** Type what you want in plain English and press Enter. The options button sets the start app,
+  success text, step budget, confidence floor, what happens when Jev is unsure (retry / ask me / stop), dry run,
+  memory use, and text slots.
+- **Live step stream.** Every decision appears as it happens: operation, target, whether it ran and how, a
+  confidence meter with the floor marked on it, timings (Jev, observe, recall, act, settle), and memory hints.
+  Expand *details* to see Jev's top alternatives for the operation and target.
+- **Approvals.** Consequential steps (e.g. *Delete*) and, with "Ask me", low-confidence steps pause with
+  **Allow / Deny** buttons. **Stop** (or ⌘.) interrupts after the current step.
+- **Side panel.** *Screen* shows exactly what Jev sees: the indexed interactive elements, menu commands and visible
+  text. *Memory* lists past runs; mark them ✓/✗ to teach retrieval. *Log* is a raw event stream.
+- **Security.** It listens on 127.0.0.1 only. Every API call needs a per-session token, and requests with a
+  foreign `Host` are rejected, so other web pages can't drive your Mac through it.
+
+Demo mode simulates Finder, TextEdit, Safari and Notes, with a transparent keyword policy standing in for Jev.
+The router contract, confidence gate, safety approvals, memory and streaming are the real code, so it behaves
+exactly like a live run apart from who makes the decisions. The example cards cover a multi-step task, a web
+search, write-and-save, a step needing approval, and a vague request that the confidence gate withholds.
 
 ### CLI
 

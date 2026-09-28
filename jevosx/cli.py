@@ -91,6 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
     doctor.set_defaults(handler=cmd_doctor)
 
+    report = sub.add_parser("report", help="print the last run(s) step by step, for troubleshooting")
+    report.add_argument("-n", type=int, default=1, help="how many recent runs (default 1)")
+    report.set_defaults(handler=cmd_report)
+
     memory = sub.add_parser("memory", help="inspect and manage local trajectory memory")
     msub = memory.add_subparsers(dest="memory_command", required=True)
     msub.add_parser("stats", help="counts and database size").set_defaults(handler=cmd_memory)
@@ -424,6 +428,57 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
                 check(False, "Jev round trip", str(exc))
     print("all checks passed" if not failures else f"{failures} check(s) failed")
     return 0 if not failures else 1
+
+
+# ---- report ------------------------------------------------------------------------------------------------------
+def cmd_report(args: argparse.Namespace, settings: Settings) -> int:
+    """Recent runs with their executed steps and every withheld (low-confidence) decision, in one paste."""
+    from datetime import datetime
+
+    from .memory.embedding import HashingEmbedder
+    from .memory.store import MemoryStore
+
+    withheld: list[dict[str, Any]] = []
+    log_path = Path(settings.agent.fallback_log).expanduser() if settings.agent.fallback_log else None
+    if log_path is not None and log_path.is_file():
+        for line in log_path.read_text(encoding="utf-8").splitlines()[-200:]:
+            try:
+                record = json.loads(line)
+                record["_t"] = datetime.strptime(record["ts"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+                withheld.append(record)
+            except (ValueError, KeyError):
+                continue
+    store = MemoryStore(settings.memory_path, HashingEmbedder(settings.memory.dim))
+    try:
+        episodes = store.episodes(args.n)
+        if not episodes:
+            print("no runs recorded yet")
+            return 0
+        print(f"jevosx {__version__} report · Python {platform.python_version()} · {platform.platform()}")
+        for episode in reversed(episodes):
+            started = time.strftime("%H:%M:%S", time.localtime(episode.started_at))
+            print(f"\n#{episode.id} {started} {episode.status} · {episode.steps} step(s) · {episode.goal!r}")
+            for step in store.steps_for([episode.id], with_vectors=False):
+                probability = f" p={step.probability:.2f}" if step.probability is not None else ""
+                confidence = f" conf={step.confidence:.2f}" if step.confidence is not None else ""
+                print(f"  step {step.idx} {step.operation} {step.target_text or ''}{probability}{confidence}")
+                print(f"         in {step.app} · {step.window!r} → {step.outcome}")
+            end = (episode.finished_at or time.time()) + 1
+            for record in (r for r in withheld if episode.started_at - 1 <= r["_t"] <= end):
+                decision = record.get("decision", {})
+                print(
+                    f"  withheld {record['ts'][11:19]} {decision.get('operation')} {decision.get('target') or ''}"
+                    f" conf={record.get('confidence')} (floor {record.get('floor')}) in {record.get('window')!r}"
+                )
+                print(f"         top: {decision.get('top_operations')} · targets: {decision.get('top_targets')}")
+                if "offered" in record:
+                    print(f"         offered: {record['offered']} · focused: {record.get('focused')}")
+                    print(f"         seen ({len(record.get('elements', []))}): {record.get('elements', [])[:12]}")
+                if record.get("observe"):
+                    print(f"         observe: {record['observe']}")
+        return 0
+    finally:
+        store.close()
 
 
 # ---- memory ------------------------------------------------------------------------------------------------------

@@ -397,6 +397,11 @@ class TreeWalker:
             # Some real inputs (e.g. Chrome's address bar) do not report AXValue as settable, but a field that has
             # keyboard focus, or is a search field, can still be typed into with keystrokes.
             typeable = value_settable or secure or attrs.get("AXFocused") is True or subrole == "AXSearchField"
+            if not typeable and role != "AXComboBox" and not frame.in_row:
+                try:  # a field the cursor can be put in is an input even if its value is not settable
+                    typeable = bool(node.settable("AXFocused"))
+                except StaleElementError:
+                    return None
             if not typeable and role != "AXComboBox":
                 return None  # read-only text (labels, table cells): treat as text, not a control
             kind = "text_input"

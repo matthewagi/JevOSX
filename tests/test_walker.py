@@ -129,3 +129,12 @@ def test_unknown_role_containers_are_walked_not_skipped():
     )
     result = TreeWalker().walk([(window(FakeNode("AXUnknown", children=[toolbar])), None)])
     assert [e.label for e in result.elements] == ["Address and search bar"]
+
+
+def test_focusable_text_field_is_typeable_but_plain_label_is_not():
+    root = window(
+        FakeNode("AXTextField", Description="Address and search bar", settable=["AXFocused"]),
+        FakeNode("AXTextField", Value="a label"),
+    )
+    result = TreeWalker().walk([(root, None)])
+    assert [(e.label, e.ops) for e in result.elements] == [("Address and search bar", ("TYPE_TEXT", "CLICK"))]

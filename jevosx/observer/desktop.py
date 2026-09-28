@@ -147,7 +147,8 @@ class MacDesktopObserver:
             "visited": walk.visited,
             "elements": len(walk.elements),
             "menu_items": len(menu_items),
-            "truncated": walk.truncated or menus_truncated,
+            "truncated": walk.truncated,  # only the window walk: the agent is told elements may be missing
+            "menus_truncated": menus_truncated,
             "walk_ms": walk.elapsed_ms,
             "notes": walk.notes,
         }

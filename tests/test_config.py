@@ -30,6 +30,27 @@ SEND = "cmd+shift+d"
     assert settings.observer.max_elements == 180  # untouched default
 
 
+def test_auto_dotenv_finds_the_checkout_key_from_any_folder(tmp_path, monkeypatch):
+    import jevosx.config as config
+
+    checkout = tmp_path / "JevOSX"
+    checkout.mkdir()
+    (checkout / "pyproject.toml").write_text("")
+    (checkout / ".env").write_text("TYPESAFE_API_KEY=from-checkout\n")
+    elsewhere = tmp_path / "home"
+    elsewhere.mkdir()
+    (elsewhere / ".env").write_text("JEV_MODEL=jev-from-cwd\n")
+    monkeypatch.setattr(config, "PROJECT_ROOT", checkout)
+    monkeypatch.chdir(elsewhere)
+    env: dict[str, str] = {}
+    settings = Settings.load(env=env)
+    assert settings.jev.api_key(env) == "from-checkout"
+    assert settings.jev.model == "jev-from-cwd"
+    monkeypatch.chdir(checkout)
+    assert config.dotenv_candidates()[0].resolve() == (checkout / ".env").resolve()
+    assert len(config.dotenv_candidates()) == 2  # the checkout .env is not listed twice
+
+
 def test_unknown_keys_and_wrong_types_fail_loudly(tmp_path):
     bad = tmp_path / "bad.toml"
     bad.write_text("[jev]\nmodle = 'typo'\n")

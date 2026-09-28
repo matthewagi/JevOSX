@@ -261,7 +261,14 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
 
     check(QUARTZ_AVAILABLE, "pyobjc Quartz (keyboard events)", "pip install pyobjc-framework-Quartz")
     key = settings.jev.api_key()
-    check(bool(key), f"{settings.jev.api_key_env} is set", "export TYPESAFE_API_KEY=… or put it in .env")
+    from .config import dotenv_candidates
+
+    places = ", ".join(str(p).replace(str(Path.home()), "~") for p in dotenv_candidates())
+    check(
+        bool(key),
+        f"{settings.jev.api_key_env} is set",
+        f"export {settings.jev.api_key_env}=… or add {settings.jev.api_key_env}=… to one of: {places}",
+    )
     try:
         import h2  # noqa: F401
 

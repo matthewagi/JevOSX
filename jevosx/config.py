@@ -13,6 +13,22 @@ from typing import Any, get_type_hints
 from .errors import ConfigError
 
 DEFAULT_CONFIG_PATHS = (Path("jevosx.toml"), Path("~/.config/jevosx/config.toml"))
+# The checkout this package runs from (e.g. ~/JevOSX for the installer's editable install), if any.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def dotenv_candidates() -> list[Path]:
+    """Where .env files are read from, first match wins per variable: the current folder, the JevOSX checkout
+    (so the global `jevosx` command finds the installer's key from any folder), then ~/.config/jevosx/.env."""
+    candidates = [Path.cwd() / ".env"]
+    if (PROJECT_ROOT / "pyproject.toml").is_file():
+        candidates.append(PROJECT_ROOT / ".env")
+    candidates.append(Path("~/.config/jevosx/.env").expanduser())
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate.resolve() not in {u.resolve() for u in unique}:
+            unique.append(candidate)
+    return unique
 
 
 @dataclass
@@ -164,10 +180,14 @@ class Settings:
         path: str | Path | None = None,
         *,
         env: MutableMapping[str, str] | None = None,
-        dotenv: str | Path | None = ".env",
+        dotenv: str | Path | None = "auto",
     ) -> Settings:
+        """`dotenv="auto"` reads every file from dotenv_candidates(); a path reads just that file; None reads none."""
         env = os.environ if env is None else env
-        if dotenv:
+        if dotenv == "auto":
+            for candidate in dotenv_candidates():
+                load_dotenv(candidate, env)
+        elif dotenv:
             load_dotenv(dotenv, env)
         data: dict[str, Any] = {}
         config_path = resolve_config_path(path, env)

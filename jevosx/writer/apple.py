@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ from .base import WRITER_INSTRUCTIONS, WriterStatus, clean_generated, writer_pro
 
 HELPER_SOURCE = Path(__file__).with_name("apple_writer.swift")
 HELPER_PREFIX = "jevosx-writer-"
+FAILED_BUILD_RETRY_S = 24 * 3600  # a broken toolchain is not retried on every run (`jevosx write --rebuild` forces it)
+FRAMEWORK = "System/Library/Frameworks/FoundationModels.framework"
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 # reason → (what it means, how to fix it)
@@ -82,6 +85,9 @@ def build_helper(
         return target
     if platform != "darwin":
         raise WriterUnavailable("notMacOS")
+    failed = target.with_name(target.name + ".failed")
+    if not force and failed.is_file() and time.time() - failed.stat().st_mtime < FAILED_BUILD_RETRY_S:
+        raise WriterUnavailable("buildFailed", failed.read_text(errors="replace")[:600])
     # `xcrun` without the Command Line Tools opens an install dialog, so ask xcode-select first (it never prompts).
     try:
         if runner(["xcode-select", "-p"], capture_output=True, text=True, timeout=10, check=False).returncode != 0:
@@ -96,7 +102,7 @@ def build_helper(
     os.close(fd)
     tmp = Path(tmp_name)
     command = ["xcrun", "--sdk", "macosx", "swiftc", "-O", "-parse-as-library", "-o", str(tmp), str(HELPER_SOURCE)]
-    if sdk and (Path(sdk) / "System/Library/Frameworks/FoundationModels.framework").exists():
+    if sdk and (Path(sdk) / FRAMEWORK).exists():
         # Weak link: a helper built with a newer SDK still starts (and reports osTooOld) on an older macOS.
         command += ["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"]
     try:
@@ -106,7 +112,11 @@ def build_helper(
             raise WriterUnavailable("buildFailed", " / ".join(errors[-6:])[:600])
         tmp.chmod(0o755)
         os.replace(tmp, target)
+    except WriterUnavailable as exc:
+        _remember_failure(failed, exc.detail)
+        raise
     except (OSError, subprocess.TimeoutExpired) as exc:
+        _remember_failure(failed, str(exc))
         raise WriterUnavailable("buildFailed", str(exc)) from None
     finally:
         with contextlib.suppress(OSError):
@@ -116,6 +126,21 @@ def build_helper(
             with contextlib.suppress(OSError):
                 old.unlink()
     return target
+
+
+def _remember_failure(marker: Path, detail: str) -> None:
+    with contextlib.suppress(OSError):
+        marker.write_text(detail or "the Swift build failed")
+
+
+def sdk_has_framework(runner: Runner = subprocess.run) -> bool:
+    """Whether the active SDK now ships FoundationModels (e.g. after a Command Line Tools update)."""
+    try:
+        sdk = runner(["xcrun", "--sdk", "macosx", "--show-sdk-path"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    path = (sdk.stdout or "").strip()
+    return bool(path) and (Path(path) / FRAMEWORK).exists()
 
 
 def _last_json(output: str) -> dict[str, Any] | None:
@@ -170,6 +195,9 @@ class AppleWriter:
             return None, exc.status()
         writer = cls(helper, runner=runner, **options)
         status = writer.status()
+        if status.reason == "sdkMissing" and not rebuild and sdk_has_framework(runner):
+            # Built with older tools; the SDK has Foundation Models now, so build the real helper once.
+            return cls.prepare(directory, rebuild=True, runner=runner, platform=platform, notify=notify, **options)
         return (writer if status.available else None), status
 
     def status(self) -> WriterStatus:

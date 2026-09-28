@@ -136,7 +136,43 @@ def test_build_helper_failures_have_reasons(tmp_path, kwargs, platform, reason):
     assert not status.available and status.reason == reason
     if reason == "buildFailed":
         assert "SystemLanguageModel" in status.detail
-    assert not list(tmp_path.glob("jevosx-writer-*"))
+    assert not [f for f in tmp_path.glob("jevosx-writer-*") if not f.name.endswith(".failed")]
+
+
+def test_a_failed_build_is_not_retried_on_every_run(tmp_path):
+    broken = FakeRunner(compile_rc=1, compile_err="error: linker command failed")
+    with pytest.raises(WriterUnavailable):
+        build_helper(tmp_path, runner=broken, platform="darwin")
+    compiles = sum("swiftc" in c for c in broken.calls)
+    with pytest.raises(WriterUnavailable) as again:
+        build_helper(tmp_path, runner=broken, platform="darwin")
+    assert "linker command failed" in again.value.detail
+    assert sum("swiftc" in c for c in broken.calls) == compiles  # remembered, not recompiled
+    fixed = FakeRunner()
+    path = build_helper(tmp_path, runner=fixed, platform="darwin", force=True)  # `jevosx write --rebuild`
+    assert path.is_file() and not list(tmp_path.glob("*.failed"))
+
+
+def test_a_stub_helper_is_rebuilt_once_the_sdk_has_foundation_models(tmp_path):
+    sdk = tmp_path / "sdk"
+    runner = FakeRunner(sdk=str(sdk), check={"available": False, "reason": "sdkMissing", "framework": False})
+    writer, status = AppleWriter.prepare(tmp_path / "bin", runner=runner, platform="darwin")
+    assert writer is None and status.reason == "sdkMissing"
+    assert sum("swiftc" in c for c in runner.calls) == 1
+    (sdk / "System/Library/Frameworks/FoundationModels.framework").mkdir(parents=True)  # tools updated
+    runner.check = {"available": True, "reason": "available", "framework": True, "os": "26.3.0"}
+    first_check = dict(runner.check)
+    runner.check = {"available": False, "reason": "sdkMissing", "framework": False}
+    answers = iter([runner.check, first_check])
+
+    def check_then_rebuild(cmd, **kwargs):
+        if cmd[-1] == "--check":
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(next(answers)) + "\n", "")
+        return FakeRunner.__call__(runner, cmd, **kwargs)
+
+    writer, status = AppleWriter.prepare(tmp_path / "bin", runner=check_then_rebuild, platform="darwin")
+    assert writer is not None and status.available
+    assert sum("swiftc" in c for c in runner.calls) == 2
 
 
 def test_prepare_reports_why_the_model_is_unavailable(tmp_path):

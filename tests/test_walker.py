@@ -107,3 +107,17 @@ def test_open_menu_root_gets_its_own_container():
     result = TreeWalker().walk([(window(), None), (menu, "open menu")])
     assert result.elements[0].label == "Copy Link"
     assert result.elements[0].container == "menu"
+
+
+def test_focused_or_search_fields_are_typeable_even_without_settable_value():
+    root = window(
+        FakeNode("AXTextField", Description="Address and search bar", Focused=True),  # Chrome omnibox
+        FakeNode("AXTextField", Subrole="AXSearchField", Description="Search"),
+        FakeNode("AXTextField", Value="just a label"),
+    )
+    result = TreeWalker().walk([(root, None)])
+    assert [(e.label, e.ops) for e in result.elements] == [
+        ("Address and search bar", ("TYPE_TEXT", "CLICK")),
+        ("Search", ("TYPE_TEXT", "CLICK")),
+    ]
+    assert "just a label" in result.text

@@ -517,6 +517,9 @@ class Agent:
                 "floor": exc.floor,
                 "policy": policy,
                 "resolution": resolution,
+                "offered": list(decision.operation_answer.probabilities),
+                "focused": obs.focused_element.describe() if obs.focused_element else None,
+                "elements": [e.describe() for e in obs.elements[:30]],
             }
         )
         return resolution

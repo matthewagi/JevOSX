@@ -106,9 +106,20 @@ class AXNode:
             raise StaleElementError("element vanished during batch read")
         if err == AX_API_DISABLED:
             raise AccessibilityPermissionError("Accessibility API is disabled for this process")
+        if err == AX_CANNOT_COMPLETE:
+            # The app did not answer within the messaging timeout. Retrying attribute by attribute would multiply
+            # the wait (one timeout per attribute), so skip this element instead.
+            raise StaleElementError("app did not respond to the batch read in time")
         if err != AX_SUCCESS or values is None:
             return {name: self.get(name) for name in attributes}
         return {name: _convert(value) for name, value in zip(attributes, values, strict=False)}
+
+    def read_many(self, attributes: Sequence[str]) -> tuple[int, dict[str, Any]]:
+        """Like get_many(), but returns (AXError code, values) and never retries or raises. For diagnostics."""
+        err, values = _AS.AXUIElementCopyMultipleAttributeValues(self.ref, list(attributes), 0, None)
+        if err != AX_SUCCESS or values is None:
+            return int(err), {}
+        return 0, {name: _convert(value) for name, value in zip(attributes, values, strict=False)}
 
     def children(self, attribute: str = "AXChildren", limit: int | None = None) -> list[AXNode]:
         # A plain attribute read, then slice. The ranged AXUIElementCopyAttributeValues call is not implemented

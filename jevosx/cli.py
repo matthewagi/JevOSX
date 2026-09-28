@@ -1,4 +1,4 @@
-"""Command-line interface: `jevosx run | observe | doctor | memory`."""
+"""Command-line interface: `jevosx run | observe | ui | diagnose | doctor | memory`."""
 
 from __future__ import annotations
 
@@ -8,13 +8,15 @@ import logging
 import platform
 import sys
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .config import Settings
 from .errors import JevOSXError
-from .types import Action
+from .types import Action, clean_text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
     ui.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     ui.set_defaults(handler=cmd_ui)
+
+    diagnose = sub.add_parser("diagnose", help="report exactly what the agent can read from the frontmost window")
+    diagnose.add_argument("--delay", type=float, default=3.0, help="seconds to switch to the app first (default 3)")
+    diagnose.add_argument("--depth", type=int, default=3, help="raw tree depth to print (default 3)")
+    diagnose.set_defaults(handler=cmd_diagnose)
 
     doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
     doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
@@ -232,6 +239,93 @@ def cmd_ui(args: argparse.Namespace, settings: Settings) -> int:
     from .ui import serve
 
     return serve(settings, demo=args.demo, host=args.host, port=args.port, open_browser=not args.no_browser)
+
+
+# ---- diagnose ----------------------------------------------------------------------------------------------------
+def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
+    """One pasteable report: frontmost detection, app AX flags, the raw window tree with error codes and timings,
+    and what the walker extracted. Only roles, labels and sizes are printed (no field values)."""
+    from .observer import create_observer
+    from .observer.apps import app_for_pid
+    from .observer.ax import AXNode, require_trusted
+
+    observer = create_observer(settings.observer)
+    require_trusted()
+    print(f"jevosx {__version__} diagnose · Python {platform.python_version()} · {platform.platform()}")
+    if args.delay:
+        print(f"click on the app to check within {args.delay:.0f} s…", flush=True)
+        time.sleep(args.delay)
+
+    def timed(fn: Callable[[], Any]) -> tuple[Any, float]:
+        started = time.perf_counter()
+        return fn(), (time.perf_counter() - started) * 1000
+
+    def show(value: Any) -> str:
+        if isinstance(value, AXNode):
+            return "<element>"
+        if isinstance(value, list):
+            return f"[{len(value)} items]"
+        return repr(value)[:60]
+
+    (pid, how), ms = timed(observer.detect_frontmost)
+    print(f"frontmost: pid {pid} via {how} ({ms:.0f} ms)")
+    if pid is None:
+        return 1
+    app = app_for_pid(pid)
+    print(f"app: {app.name} ({app.bundle_id})")
+    node = observer.app_node(pid)
+    observer.enable_web_accessibility(pid, app, node)
+    window: Any = None
+    for attribute in ("AXRole", "AXEnhancedUserInterface", "AXManualAccessibility", "AXFocusedWindow",
+                      "AXMainWindow", "AXWindows", "AXFocusedUIElement"):  # fmt: skip
+        (err, value), ms = timed(partial(node.read, attribute))
+        print(f"  app.{attribute}: err={err} {show(value)} ({ms:.0f} ms)")
+        if attribute in ("AXFocusedWindow", "AXMainWindow") and window is None and isinstance(value, AXNode):
+            window = value
+        if attribute == "AXWindows" and window is None and value:
+            window = next((w for w in value if isinstance(w, AXNode)), None)
+    if window is None:
+        print("no window found")
+        return 1
+
+    print(f"raw window tree (depth ≤ {args.depth}):")
+    lines = 0
+    attrs = ("AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXSize", "AXHidden", "AXEnabled")
+
+    def dump(element: Any, depth: int) -> None:
+        nonlocal lines
+        if lines >= 80:
+            return
+        (err, values), ms = timed(lambda: element.read_many(attrs))
+        (kerr, kids), kms = timed(lambda: element.read("AXChildren"))
+        kids = [k for k in (kids or []) if isinstance(k, AXNode)]
+        size = values.get("AXSize")
+        size_text = f"{size[0]:.0f}x{size[1]:.0f}" if isinstance(size, tuple) and len(size) == 2 else "?"
+        label = clean_text(values.get("AXTitle") or values.get("AXDescription"), 40)
+        flags = " hidden" if values.get("AXHidden") else ""
+        flags += " disabled" if values.get("AXEnabled") is False else ""
+        print(
+            f"  {'  ' * depth}{values.get('AXRole') or '?'}/{values.get('AXSubrole') or '-'} {label!r} {size_text}"
+            f"{flags} kids={len(kids)} err={err}/{kerr} {ms + kms:.0f}ms"
+        )
+        lines += 1
+        if depth < args.depth:
+            for kid in kids[:15]:
+                dump(kid, depth + 1)
+
+    dump(window, 0)
+    try:
+        obs, ms = timed(observer.observe)
+    except JevOSXError as exc:
+        print(f"observe failed: {exc}")
+        return 1
+    stats = {k: obs.stats.get(k) for k in ("visited", "elements", "menu_items", "truncated", "walk_ms", "notes")}
+    print(f"walker: {stats} (observe {ms:.0f} ms)")
+    focused = obs.focused_element.describe() if obs.focused_element else None
+    print(f"window: {obs.window.title if obs.window else None!r} · focused: {focused}")
+    for element in obs.elements[:15]:
+        print(f"  {element.describe()}  {{{','.join(element.ops) or '-'}}}")
+    return 0
 
 
 # ---- doctor ------------------------------------------------------------------------------------------------------

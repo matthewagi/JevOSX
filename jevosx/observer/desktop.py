@@ -117,7 +117,7 @@ class MacDesktopObserver:
             raise StaleElementError(f"no frontmost application ({how})")
         app = appmod.app_for_pid(pid)
         node = self.app_node(pid)
-        self._enable_web_accessibility(pid, app, node)
+        self.enable_web_accessibility(pid, app, node)
 
         windows, focused_window = self._windows(node)
         # The window's own frame becomes the visibility clip for its subtree (see TreeWalker).
@@ -212,7 +212,7 @@ class MacDesktopObserver:
         self._menu_cache[pid] = (now, items, truncated)
         return items, truncated
 
-    def _enable_web_accessibility(self, pid: int, app: AppInfo, node: AXNode) -> None:
+    def enable_web_accessibility(self, pid: int, app: AppInfo, node: AXNode) -> None:
         if not self.settings.enable_web_accessibility or pid in self._web_enabled:
             return
         self._web_enabled.add(pid)

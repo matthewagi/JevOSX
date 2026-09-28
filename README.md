@@ -182,7 +182,10 @@ The walk itself is bounded by node count, element count, depth, children per nod
 
 **Confidence gate and fallback.** `agent.min_confidence` (default **0.65**) is compared against the *weakest*
 confidence among the answers that would drive execution: operation, chosen target, and text slot. `DONE` is gated
-too, so an unsure `DONE` cannot end a run early. Below the floor, `LowConfidenceError` is raised and handled:
+too, so an unsure `DONE` cannot end a run early. One exception: while the web console's own browser window is in front, the
+agent may only open a new window or tab, or switch apps or windows. Those moves change nothing, so they are not gated by
+default (`agent.gate_console_navigation = true` gates them too). Below the floor, `LowConfidenceError` is raised and
+handled:
 
 | `agent.low_confidence_policy` | Behaviour |
 | --- | --- |

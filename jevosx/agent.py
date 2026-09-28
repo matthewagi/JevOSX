@@ -33,13 +33,17 @@ from .router.text import LLMTextWriter, TextSource, slots_from_goal
 from .types import (
     BLOCKED,
     DONE,
+    FOCUS_WINDOW,
+    MENU,
     OPEN_APP,
+    PRESS_KEY,
     TYPE_TEXT,
     WAIT,
     Action,
     ActionResult,
     Observation,
     clean_text,
+    is_console_window,
 )
 
 log = logging.getLogger("jevosx")
@@ -335,7 +339,11 @@ class Agent:
                     break
 
                 # Confidence gate: nothing (not even DONE) is acted on below the floor. WAIT is harmless.
-                if op != WAIT:
+                if op != WAIT and self._console_navigation(decision, obs):
+                    event.message = (
+                        f"moving away from the console (confidence {decision.gate_confidence:.2f}; not gated)"
+                    )
+                elif op != WAIT:
                     try:
                         self.gate.check(decision)
                         low_confidence = 0
@@ -453,7 +461,7 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
                 event.status = "acted" if result.ok else "failed"
                 event.result = result
-                event.message = result.detail
+                event.message = " · ".join(m for m in (event.message, result.detail) if m)
                 event.timings.update(act_ms=_ms(t4, t5), settle_ms=_ms(t5, t6))
                 yield emit(event)
         except KeyboardInterrupt:
@@ -524,6 +532,13 @@ class Agent:
                 out.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError as exc:
             log.warning("cannot write fallback log %s: %s", path, exc)
+
+    def _console_navigation(self, decision: Decision, obs: Observation) -> bool:
+        """New window/tab or app/window switch while the web console is in front: harmless, so not gated.
+        The action space only offers these there, and the safety policy re-checks them before execution."""
+        if self.settings.agent.gate_console_navigation or obs.window is None:
+            return False
+        return is_console_window(obs.window.title) and decision.operation in CONSOLE_NAVIGATION
 
     @staticmethod
     def _preview_action(decision: Decision) -> Action:
@@ -625,6 +640,9 @@ class Agent:
             f" · conf {confidence:.2f}" if confidence is not None else "",
             f" · {timings}" if timings else "",
         )
+
+
+CONSOLE_NAVIGATION = frozenset({PRESS_KEY, MENU, OPEN_APP, FOCUS_WINDOW})
 
 
 def _typing_tip(text_source: TextSource) -> str:

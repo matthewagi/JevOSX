@@ -64,6 +64,7 @@ max_steps = 40
 min_confidence = 0.65              # confidence gate: below this, nothing is executed blindly
 low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
 max_low_confidence_retries = 2
+gate_console_navigation = false    # true: also gate new-window/app-switch moves away from the web console
 fallback_log = "~/.jevosx/fallbacks.jsonl"
 max_stale_retries = 3
 stuck_after = 3                    # consecutive actions with no visible change → blocked

@@ -137,6 +137,9 @@ class AgentSettings:
     min_confidence: float = 0.65
     low_confidence_policy: str = "retry"  # retry (re-observe) | ask (human approves) | stop
     max_low_confidence_retries: int = 2
+    # From the web console's own window the agent may only open a window/tab or switch apps/windows. Those moves
+    # change nothing, so by default they are not held back by the floor (set true to gate them too).
+    gate_console_navigation: bool = False
     fallback_log: str = "~/.jevosx/fallbacks.jsonl"  # JSON-lines record of every withheld decision ("" = off)
     max_stale_retries: int = 3
     stuck_after: int = 3

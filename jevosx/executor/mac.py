@@ -34,6 +34,21 @@ from . import input as keyboard
 from .keys import KeyChord
 
 PRESS_ACTIONS = ("AXPress", "AXConfirm", "AXPick", "AXOpen")
+BROWSER_BUNDLES = frozenset(
+    {
+        "com.apple.Safari",
+        "com.apple.SafariTechnologyPreview",
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "company.thebrowser.Browser",
+        "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera",
+        "org.chromium.Chromium",
+        "org.mozilla.firefox",
+    }
+)
 ELEMENT_OPERATIONS = frozenset({CLICK, TYPE_TEXT, MENU, SCROLL_UP, SCROLL_DOWN})
 
 
@@ -69,7 +84,8 @@ class MacExecutor:
             if op == CLICK and action.element is not None:
                 result = self._click(action.element)
             elif op == TYPE_TEXT and action.element is not None and action.text is not None:
-                result = self._type(action.element, action.text, secret=action.text_is_secret)
+                keys = obs.app.bundle_id in BROWSER_BUNDLES
+                result = self._type(action.element, action.text, secret=action.text_is_secret, prefer_keys=keys)
             elif op == MENU and action.element is not None:
                 action.element.node.perform("AXPress")
                 result = ActionResult(True, "AXPress")
@@ -114,12 +130,15 @@ class MacExecutor:
             return ActionResult(True, "pointer", "no AX press action; clicked the element's AX frame centre")
         return ActionResult(False, "none", "element exposes no press, select, or focus action")
 
-    def _type(self, element: UIElement, text: str, *, secret: bool) -> ActionResult:
+    def _type(self, element: UIElement, text: str, *, secret: bool, prefer_keys: bool = False) -> ActionResult:
         node = element.node
         self._try_set(node, "AXFocused", True)
         mode = self.settings.typing_mode
         if mode == "auto":
-            mode = "keys" if element.in_web_area or element.secure else "ax"
+            # Browsers and search fields react to real key events (suggestions, Return to submit) but may ignore a
+            # directly set AXValue; plain native text views take the exact, instant AXValue write.
+            keystrokes = prefer_keys or element.in_web_area or element.secure or element.subrole == "AXSearchField"
+            mode = "keys" if keystrokes else "ax"
         if mode == "ax" and element.value_settable and not element.secure:
             try:
                 node.set("AXValue", text)

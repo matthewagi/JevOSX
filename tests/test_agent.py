@@ -256,3 +256,57 @@ def test_safety_never_acts_inside_the_console_window():
     assert policy.check(Action("MENU", element=close), safari, window_title=title).verdict == "deny"
     assert policy.check(Action("MENU", element=new), safari, window_title=title).allowed
     assert policy.check(Action("TYPE_TEXT", element=field, text="x"), safari, window_title="Apple").allowed
+
+
+def console_desktop():
+    from jevosx.types import AppInfo as App
+
+    chrome = App("Google Chrome", "com.google.Chrome", pid=300)
+    screens = {
+        "console": lambda: observation(
+            [element(1, "AXTextField", "Address and search bar", kind="text_input", ops=("TYPE_TEXT", "CLICK"))],
+            app=chrome,
+            window="JevOSX Console - Google Chrome",
+            running=[chrome],
+        ),
+        "new": lambda: observation(
+            [
+                element(
+                    1,
+                    "AXTextField",
+                    "Address and search bar",
+                    kind="text_input",
+                    ops=("TYPE_TEXT", "CLICK"),
+                    focused=True,
+                )
+            ],
+            app=chrome,
+            window="New Tab - Google Chrome",
+            running=[chrome],
+        ),  # fmt: skip
+    }
+    return FakeDesktop(screens, "console", {("console", "CMD_N"): "new"})
+
+
+def test_leaving_the_console_is_not_held_back_but_content_actions_are(tmp_path):
+    def answer(body):
+        if "never act inside it" in body["state"]["desktop"].get("note", ""):
+            return {"operation": ("PRESS_KEY", 0.55), "key_target": ("CMD_N", 0.9)}
+        return {"operation": ("TYPE_TEXT", 0.5)}
+
+    desktop = console_desktop()
+    agent, _, _ = make_agent(tmp_path, answer, desktop=desktop, memory=False)
+    with agent:
+        result = agent.run("look for pictures of flowers red")
+    assert desktop.executed[0] == "PRESS_KEY CMD_N (cmd+n)"
+    assert result.events[0].status == "acted" and "not gated" in result.events[0].message
+    assert all("TYPE_TEXT" not in a for a in desktop.executed)  # typing at 0.50 stays withheld
+    assert result.status == "low_confidence"
+
+    settings = Settings()
+    settings.agent.gate_console_navigation = True
+    desktop = console_desktop()
+    agent, _, _ = make_agent(tmp_path, answer, desktop=desktop, memory=False, settings=settings)
+    with agent:
+        assert agent.run("look for pictures of flowers red").status == "low_confidence"
+    assert desktop.executed == []

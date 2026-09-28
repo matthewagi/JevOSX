@@ -302,7 +302,7 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
 
     print(f"raw window tree (depth ≤ {args.depth}):")
     lines = 0
-    attrs = ("AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXSize", "AXHidden", "AXEnabled")
+    attrs = ("AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXPosition", "AXSize", "AXHidden", "AXEnabled")
 
     def dump(element: Any, depth: int) -> None:
         nonlocal lines
@@ -313,6 +313,9 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
         kids = [k for k in (kids or []) if isinstance(k, AXNode)]
         size = values.get("AXSize")
         size_text = f"{size[0]:.0f}x{size[1]:.0f}" if isinstance(size, tuple) and len(size) == 2 else "?"
+        position = values.get("AXPosition")
+        if isinstance(position, tuple) and len(position) == 2:
+            size_text += f"@{position[0]:.0f},{position[1]:.0f}"
         label = clean_text(values.get("AXTitle") or values.get("AXDescription"), 40)
         if values.get("AXRole") == "AXGroup" and not label and len(kids) == 1 and not err and depth:
             dump(kids[0], depth)  # unlabeled single-child wrapper: print its content at the same level

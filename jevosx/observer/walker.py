@@ -117,6 +117,7 @@ CONTAINER_ROLES = frozenset(
 )
 ALWAYS_NAMED_CONTAINERS = frozenset({"AXSheet", "AXToolbar", "AXPopover", "AXMenu"})
 ROW_ROLES = frozenset({"AXRow"})
+CLIP_ROLES = frozenset({"AXScrollArea", "AXWebArea"})
 CHECKABLE_SUBROLES = frozenset({"AXToggle", "AXSwitch"})
 
 
@@ -206,6 +207,16 @@ class TreeWalker:
         self.clock = clock
 
     def walk(self, roots: Sequence[tuple[Any, str | None]], *, clip: Rect | None = None) -> WalkResult:
+        result = self._walk(roots, clip=clip, use_clip=True)
+        if not result.elements and result.skipped.get("offscreen"):
+            # Everything looked off-screen: the geometry is inconsistent, not the window empty. Walk again unclipped.
+            retry = self._walk(roots, clip=None, use_clip=False)
+            retry.notes.append(f"unclipped re-walk ({result.skipped['offscreen']} subtrees looked off-screen)")
+            retry.elapsed_ms = round(retry.elapsed_ms + result.elapsed_ms, 1)
+            return retry
+        return result
+
+    def _walk(self, roots: Sequence[tuple[Any, str | None]], *, clip: Rect | None, use_clip: bool) -> WalkResult:
         limits = self.limits
         started = self.clock()
         deadline = started + limits.time_budget_s
@@ -248,7 +259,7 @@ class TreeWalker:
                 skip("hidden" if attrs.get("AXHidden") is True else "skipped_role")
                 continue  # hidden or chrome-only: prune the whole subtree
             rect = frame_of(attrs)
-            if rect is not None and not rect.empty and frame.clip is not None and not rect.intersects(frame.clip):
+            if use_clip and rect and not rect.empty and frame.clip is not None and not rect.intersects(frame.clip):
                 skip("offscreen")
                 continue  # entirely outside the visible region: prune the whole subtree
             zero_size = rect is not None and rect.empty  # collapsed/invisible: never indexed as a control
@@ -341,8 +352,14 @@ class TreeWalker:
                 name = friendly_role(role, subrole)
                 container = f'{name} "{label}"' if label else name
             child_clip = frame.clip
-            if role in ("AXScrollArea", "AXWindow") and rect is not None and not rect.empty:
-                child_clip = rect if child_clip is None else (child_clip.intersection(rect) or rect)
+            # Only scrollable content clips its descendants: that is where "not visible" means "scrolled away". A
+            # window's own frame is not used, because apps can report it inconsistently (Chrome did while a new
+            # window opened, which hid its entire content).
+            if use_clip and role in CLIP_ROLES and rect is not None and not rect.empty:
+                if child_clip is None:
+                    child_clip = rect
+                elif child_clip.intersects(rect):
+                    child_clip = child_clip.intersection(rect)
 
             try:
                 kids = self._children(frame.node, role)

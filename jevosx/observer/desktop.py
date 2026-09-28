@@ -165,6 +165,7 @@ class MacDesktopObserver:
             installed_apps=self.installed_apps(),
             stats=stats,
             captured_at=time.time(),
+            page_url=walk.page_url,
         )
         obs.stats["observe_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return obs

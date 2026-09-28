@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from .config import Settings
 from .errors import (
@@ -25,12 +25,14 @@ from .errors import (
 )
 from .executor.base import DryRunExecutor, Executor
 from .executor.safety import SafetyPolicy
+from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import Observer
-from .router.policy import Decision, JevRouter
+from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal
 from .types import (
+    ASK_USER,
     BLOCKED,
     DONE,
     FOCUS_WINDOW,
@@ -48,8 +50,11 @@ from .types import (
 from .writer import TextWriter, create_writer, wants_generation
 
 log = logging.getLogger("jevosx")
+T = TypeVar("T")
 
 ConfirmFn = Callable[[Action, str], bool]
+# ASK_USER: tell the human what only they can do (e.g. "type a verification code (Safari)"); True = done, continue.
+HandoffFn = Callable[[str, Observation], bool]
 Verifier = Callable[[Observation], bool]
 # Returns "retry" (re-observe, nothing executed), "execute" (explicitly approve this decision) or "stop".
 LowConfidenceHandler = Callable[[LowConfidenceError, Observation], str]
@@ -151,7 +156,9 @@ class Agent:
         safety: SafetyPolicy | None = None,
         memory: MemoryStore | None = None,
         text_writer: TextWriter | None = None,
+        logins: LoginStore | None = None,
         confirm: ConfirmFn | None = None,
+        handoff: HandoffFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.perf_counter,
@@ -164,13 +171,16 @@ class Agent:
         self.memory = memory
         self.retriever = MemoryRetriever(memory, self.settings.memory) if memory is not None else None
         self.text_writer = text_writer
+        self.logins = logins
         self.confirm = confirm
+        self.handoff = handoff
         self.gate = ConfidenceGate(self.settings.agent.min_confidence)
         self.on_low_confidence = on_low_confidence
         self.sleep = sleep
         self.clock = clock
         self.last_result: RunResult | None = None
         self.last_observation: Observation | None = None
+        self._sensitive: list[str] = []  # saved-login usernames on screen: masked in events, memory and logs
 
     @classmethod
     def from_settings(
@@ -180,6 +190,7 @@ class Agent:
         dry_run: bool = False,
         use_memory: bool = True,
         confirm: ConfirmFn | None = None,
+        handoff: HandoffFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
         notify: Callable[[str], None] | None = None,
     ) -> Agent:
@@ -203,6 +214,7 @@ class Agent:
             memory = MemoryStore(settings.memory_path, HashingEmbedder(settings.memory.dim))
         writer, status = create_writer(settings, notify=notify)
         log.info("text writer: %s", status.describe())
+        logins = LoginStore(settings.logins.index_path) if settings.logins.enabled else None
         return cls(
             observer=observer,
             executor=executor,
@@ -210,7 +222,9 @@ class Agent:
             settings=settings,
             memory=memory,
             text_writer=writer,
+            logins=logins,
             confirm=confirm,
+            handoff=handoff,
             on_low_confidence=on_low_confidence,
         )
 
@@ -248,7 +262,7 @@ class Agent:
         status = "aborted"
         message = ""
         pending: _Pending | None = None
-        low_confidence = stale = done_rejections = no_change = text_failures = 0
+        low_confidence = stale = done_rejections = no_change = text_failures = handoffs = 0
 
         def emit(event: StepEvent) -> StepEvent:
             events.append(event)
@@ -285,13 +299,17 @@ class Agent:
                     pending.entry["result"] = "ui changed" if changed else "no visible change"
                     if self.memory is not None and pending.step_id is not None:
                         self.memory.set_outcome(pending.step_id, "changed" if changed else "unchanged")
-                    no_change = 0 if changed or pending.operation == WAIT else no_change + 1
+                    no_change = 0 if changed or pending.operation in (WAIT, ASK_USER) else no_change + 1
                     pending = None
                     if no_change >= cfg.stuck_after:
                         status, message = "blocked", f"{no_change} consecutive actions produced no visible change"
                         break
 
-                space = self.router.space(obs, text_source, goal)
+                if self.logins is not None:
+                    text_source.set_credentials(credential_slots(self.logins, obs, goal))
+                    self._sensitive = text_source.sensitive_values()
+                can_hand_off = self.handoff is not None and handoffs < cfg.max_handoffs
+                space = self.router.space(obs, text_source, goal, handoff=can_hand_off)
                 hints: list[Hint] = []
                 if self.retriever is not None:
                     hints = self.retriever.hints(goal, obs, space, exclude_episode=episode_id)
@@ -311,8 +329,8 @@ class Agent:
                 event = StepEvent(
                     step=steps + 1,
                     status="decided",
-                    action=decision.describe(),
-                    decision=decision.summary(),
+                    action=self._mask(decision.describe()),
+                    decision=self._mask(decision.summary()),
                     hints=[h.to_state() for h in hints],
                     observation={
                         "app": obs.app.name,
@@ -367,6 +385,24 @@ class Agent:
                             continue
                         low_confidence = 0  # "execute": explicitly approved by the fallback handler
 
+                if op == ASK_USER and self.handoff is not None:
+                    steps += 1
+                    handoffs += 1
+                    need = decision.target.criterion.get("need", "help") if decision.target else "help"
+                    where = obs.app.name + (f", window “{obs.window.title}”" if obs.window else "")
+                    event.status, event.message = "handoff", f"waiting for you to {need}"
+                    entry = {"step": steps, "action": decision.describe(), "result": "waiting for the user"}
+                    history.append(entry)
+                    step_id = self._record(episode_id, steps, obs, decision, outcome="pending")
+                    yield emit(event)
+                    if not self.handoff(f"{need} ({where})", obs):
+                        entry["result"] = "the user stopped the run"
+                        status, message = "aborted", "stopped by you during a hand-off"
+                        break
+                    entry["result"] = "the user finished; check the screen"
+                    pending = _Pending(step_id, entry, obs.fingerprint, op)
+                    continue
+
                 if op == DONE:
                     if verifier is not None and not verifier(obs):
                         done_rejections += 1
@@ -408,7 +444,9 @@ class Agent:
                         break
                     continue
 
-                verdict = self.safety.check(action, obs.app, window_title=obs.window.title if obs.window else None)
+                verdict = self.safety.check(
+                    action, obs.app, window_title=obs.window.title if obs.window else None, page_url=obs.page_url
+                )
                 if verdict.verdict == "deny" or (
                     verdict.verdict == "confirm" and not (self.confirm and self.confirm(action, verdict.reason))
                 ):
@@ -454,7 +492,9 @@ class Agent:
                     obs,
                     decision,
                     outcome="pending" if result.ok else "failed",
-                    text=action.text if self.settings.memory.store_typed_text and not action.text_is_secret else None,
+                    text=action.text
+                    if self.settings.memory.store_typed_text and not (action.text_is_secret or action.text_label)
+                    else None,
                 )
                 if result.ok:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
@@ -493,6 +533,9 @@ class Agent:
             )
             log.info("run finished: %s after %d steps (%s)", status, steps, message or "no message")
 
+    def _mask(self, value: T) -> T:
+        return redact(value, self._sensitive) if self._sensitive else value
+
     def _handle_low_confidence(self, exc: LowConfidenceError, goal: str, obs: Observation) -> str:
         """Fallback for a withheld decision: custom handler, else the configured policy. Always logged."""
         policy = self.settings.agent.low_confidence_policy
@@ -514,14 +557,14 @@ class Agent:
                 "goal": goal,
                 "app": obs.app.name,
                 "window": obs.window.title if obs.window else None,
-                "decision": decision.summary(),
+                "decision": self._mask(decision.summary()),
                 "confidence": round(exc.confidence, 4),
                 "floor": exc.floor,
                 "policy": policy,
                 "resolution": resolution,
                 "offered": list(decision.operation_answer.probabilities),
                 "focused": obs.focused_element.describe() if obs.focused_element else None,
-                "elements": [e.describe() for e in obs.elements[:30]],
+                "elements": self._mask([e.describe() for e in obs.elements[:30]]),
                 "observe": {k: obs.stats.get(k) for k in ("visited", "walk_ms", "truncated", "notes", "skipped")},
             }
         )
@@ -613,11 +656,11 @@ class Agent:
             episode_id,
             idx=idx,
             app=obs.app.bundle_id or obs.app.name,
-            window=obs.window.title if obs.window else None,
-            state_summary=state_summary(obs),
+            window=self._mask(obs.window.title if obs.window else None),
+            state_summary=self._mask(state_summary(obs)),
             operation=decision.operation,
             memory_key=target.memory_key if target else None,
-            target_text=target.describe() if target else None,
+            target_text=self._mask(target.describe()) if target else None,
             probability=decision.probability,
             confidence=decision.confidence,
             outcome=outcome,

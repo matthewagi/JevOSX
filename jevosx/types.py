@@ -151,6 +151,7 @@ class UIElement:
     checked: bool | None = None
     expanded: bool | None = None
     secure: bool = False
+    filled: bool | None = None  # password fields: whether they hold text (their value is never read or shown)
     container: str | None = None
     identifier: str | None = None
     shortcut: str | None = None
@@ -184,6 +185,8 @@ class UIElement:
             out.append("expanded" if self.expanded else "collapsed")
         if self.secure:
             out.append("secure")
+            if self.filled is not None:
+                out.append("filled" if self.filled else "empty")
         return out
 
     def describe(self, prefix: str = "") -> str:
@@ -211,6 +214,7 @@ class Observation:
     fingerprint: str = ""
     stats: dict[str, Any] = field(default_factory=dict)
     captured_at: float = 0.0
+    page_url: str | None = None  # the focused web page (AXURL of its web area), when a browser is in front
 
     def __post_init__(self) -> None:
         if not self.fingerprint:
@@ -227,9 +231,12 @@ class Observation:
 
     def compute_fingerprint(self) -> str:
         digest = hashlib.blake2b(digest_size=8)
-        digest.update(f"{self.app.pid}|{self.app.bundle_id}|{self.window.title if self.window else ''}".encode())
+        window = self.window.title if self.window else ""
+        digest.update(f"{self.app.pid}|{self.app.bundle_id}|{window}|{self.page_url or ''}".encode())
         for e in self.elements:
             digest.update(f"|{e.role}:{e.label}:{e.value}:{e.enabled}:{e.focused}:{e.checked}:{e.selected}".encode())
+            if e.secure:
+                digest.update(f":{e.filled}".encode())
         digest.update(self.text.encode())
         return digest.hexdigest()
 
@@ -243,6 +250,7 @@ SCROLL_UP = "SCROLL_UP"
 SCROLL_DOWN = "SCROLL_DOWN"
 OPEN_APP = "OPEN_APP"
 FOCUS_WINDOW = "FOCUS_WINDOW"
+ASK_USER = "ASK_USER"  # hand control to the human (2FA code, CAPTCHA, passkey…), then continue
 WAIT = "WAIT"
 DONE = "DONE"
 BLOCKED = "BLOCKED"

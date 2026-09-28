@@ -9,7 +9,7 @@ from jevosx.executor.keys import key_vocabulary
 from jevosx.memory import MemoryStore
 from jevosx.router.policy import JevRouter
 from jevosx.ui.demo import DemoDesktop, SimulatedJev
-from jevosx.ui.server import Components, EventBus, RunManager, RunOptions, UIServer
+from jevosx.ui.server import Components, EventBus, RunManager, RunOptions, UIServer, demo_logins
 from jevosx.writer.simulated import SimulatedWriter
 
 
@@ -26,7 +26,9 @@ def make_manager():
 
     def builder(settings, demo):
         router = JevRouter.from_settings(SimulatedJev(latency=False).client(), settings.jev, key_vocabulary())
-        return Components(desktop, desktop, router, MemoryStore(":memory:"), SimulatedWriter(), demo=True)
+        return Components(
+            desktop, desktop, router, MemoryStore(":memory:"), SimulatedWriter(), demo=True, logins=demo_logins()
+        )
 
     bus = EventBus()
     return RunManager(demo_settings(), demo=True, bus=bus, builder=builder), desktop, bus
@@ -76,6 +78,31 @@ def test_demo_scenarios_complete(goal, check):
         assert run["status"] == "done", run
         assert check(desktop)
         assert all(e["status"] in ("acted", "done") for e in run["events"])
+    finally:
+        manager.close()
+
+
+def test_demo_sign_in_types_the_saved_login_and_hands_off_two_factor():
+    manager, desktop, _ = make_manager()
+    try:
+        run = run_to_end(manager, "Log in to github.com in Safari", approve=True)
+        assert run["status"] == "done", run
+        safari = desktop.apps["Safari"]
+        assert safari.login == "done" and safari.username == "octocat"
+        statuses = [e["status"] for e in run["events"]]
+        assert "handoff" in statuses and statuses[-1] == "done"
+        dumped = json.dumps(run, default=str)
+        assert "demo-password-123" not in dumped and "octocat" not in dumped
+    finally:
+        manager.close()
+
+
+def test_demo_sign_in_without_approval_never_types_the_password():
+    manager, desktop, _ = make_manager()
+    try:
+        run = run_to_end(manager, "Log in to github.com in Safari", approve=False)
+        assert run["status"] != "done" and desktop.apps["Safari"].password == ""
+        assert any(e["status"] == "declined" for e in run["events"])
     finally:
         manager.close()
 

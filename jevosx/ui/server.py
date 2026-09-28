@@ -34,6 +34,7 @@ from ..agent import Agent, expect_text_verifier
 from ..config import Settings
 from ..errors import JevOSXError
 from ..executor.base import DryRunExecutor, Executor
+from ..logins import LoginStore
 from ..memory.store import MemoryStore
 from ..router.policy import JevRouter, element_state
 from ..types import Action, Observation
@@ -140,6 +141,7 @@ class Components:
     text_writer: TextWriter | None
     demo: bool
     writer_status: WriterStatus | None = None
+    logins: LoginStore | None = None
 
     def close(self) -> None:
         self.router.client.close()
@@ -164,7 +166,16 @@ def build_components(settings: Settings, *, demo: bool) -> Components:
         router = JevRouter.from_settings(SimulatedJev().client(), settings.jev, keys)
         memory = MemoryStore(":memory:", embedder) if settings.memory.enabled else None
         status = WriterStatus("simulated", True, "available", "demo writer with canned text")
-        return Components(desktop, desktop, router, memory, SimulatedWriter(), demo=True, writer_status=status)
+        return Components(
+            desktop,
+            desktop,
+            router,
+            memory,
+            SimulatedWriter(),
+            demo=True,
+            writer_status=status,
+            logins=demo_logins(),
+        )
 
     from ..executor import create_executor
     from ..observer import create_observer
@@ -176,7 +187,8 @@ def build_components(settings: Settings, *, demo: bool) -> Components:
     router = JevRouter.from_settings(JevClient.from_settings(settings.jev), settings.jev, keys)
     memory = MemoryStore(settings.memory_path, embedder) if settings.memory.enabled else None
     writer, status = create_writer(settings, notify=lambda message: log.warning("%s", message))
-    return Components(observer, executor, router, memory, writer, demo=False, writer_status=status)
+    logins = LoginStore(settings.logins.index_path) if settings.logins.enabled else None
+    return Components(observer, executor, router, memory, writer, demo=False, writer_status=status, logins=logins)
 
 
 @dataclass
@@ -250,7 +262,9 @@ class RunManager:
                 settings=settings,
                 memory=components.memory if options.use_memory else None,
                 text_writer=components.text_writer,
+                logins=components.logins,
                 confirm=self._confirm,
+                handoff=self._handoff,
             )
             run_id = secrets.token_hex(4)
             self.current = {
@@ -393,11 +407,23 @@ class RunManager:
 
     def _confirm(self, action: Action, reason: str) -> bool:
         """Called on the worker thread by the safety policy or the low-confidence 'ask' fallback."""
-        request_id = secrets.token_hex(4)
         category = "low_confidence" if "below the floor" in reason else "safety"
-        approval = _Approval(
-            info={"request_id": request_id, "action": action.describe(), "reason": reason, "category": category}
+        return self._ask(action.describe(), reason, category)
+
+    def _handoff(self, request: str, _obs: Observation) -> bool:
+        """ASK_USER: the human does what only they can (2FA code, CAPTCHA…), then presses Continue (or Stop)."""
+        done = self._ask(
+            f"Please {request}.", "Do it on the Mac, then continue. Jev looks at the screen again.", "handoff"
         )
+        observer = self._components.observer if self._components is not None else None
+        simulate = getattr(observer, "user_completes_handoff", None)
+        if done and self.demo and simulate is not None:
+            simulate()  # demo: the simulated person types the code
+        return done
+
+    def _ask(self, action: str, reason: str, category: str) -> bool:
+        request_id = secrets.token_hex(4)
+        approval = _Approval(info={"request_id": request_id, "action": action, "reason": reason, "category": category})
         self._approvals[request_id] = approval
         self.bus.publish("approval", run_id=self.current["id"] if self.current else None, **approval.info)
         deadline = time.monotonic() + APPROVAL_TIMEOUT_S
@@ -656,3 +682,15 @@ def _warm_up(manager: RunManager) -> None:
         return
     if components.writer_status is not None:
         print(f"writer {components.writer_status.describe()}")
+
+
+def demo_logins() -> LoginStore:
+    """A throwaway login for the simulated sign-in page (never the real Keychain)."""
+    import tempfile
+
+    from ..logins import MemorySecrets
+
+    folder = Path(tempfile.mkdtemp(prefix="jevosx-demo-"))
+    store = LoginStore(folder / "logins.json", MemorySecrets())
+    store.add("github.com", "octocat", "demo-password-123")
+    return store

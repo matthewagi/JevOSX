@@ -1,4 +1,4 @@
-"""Command-line interface: `jevosx run | observe | ui | write | diagnose | doctor | report | memory`."""
+"""Command-line interface: `jevosx run | observe | ui | write | login | diagnose | doctor | report | memory`."""
 
 from __future__ import annotations
 
@@ -94,6 +94,22 @@ def build_parser() -> argparse.ArgumentParser:
     write.add_argument("--backend", choices=["auto", "apple", "openai"], help="override [writer] backend")
     write.set_defaults(handler=cmd_write)
 
+    login = sub.add_parser("login", help="save website logins in the macOS Keychain for sign-in tasks")
+    lsub = login.add_subparsers(dest="login_command", required=True)
+    add = lsub.add_parser("add", help="save a login: jevosx login add github.com")
+    add.add_argument("site", help="the sign-in page's site, e.g. github.com (covers its subdomains)")
+    add.add_argument("--username", help="asked for when omitted")
+    add.add_argument("--password-stdin", action="store_true", help="read the password from stdin (for scripts)")
+    add.set_defaults(handler=cmd_login)
+    lsub.add_parser("list", help="saved sites and usernames (never passwords)").set_defaults(handler=cmd_login)
+    remove = lsub.add_parser("remove", help="forget a saved login (and delete it from the Keychain)")
+    remove.add_argument("site")
+    remove.add_argument("--username", help="only this username (default: every login for the site)")
+    remove.set_defaults(handler=cmd_login)
+    match = lsub.add_parser("match", help="which saved login would be offered on this page URL")
+    match.add_argument("url", help="e.g. https://github.com/login")
+    match.set_defaults(handler=cmd_login)
+
     doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
     doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
     doctor.set_defaults(handler=cmd_doctor)
@@ -159,8 +175,19 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     if args.delay:
         print(f"starting in {args.delay:.1f}s…")
         time.sleep(args.delay)
+
+    def handoff(request: str, _obs: Any) -> bool:
+        print(f"  ⏸ Jev needs you to {request}.")
+        answer = input("    Do it on the Mac, then press Enter to continue (or type stop): ").strip().lower()
+        return answer not in ("stop", "s", "q", "quit", "n", "no")
+
     agent = Agent.from_settings(
-        settings, dry_run=args.dry_run, use_memory=not args.no_memory, confirm=confirm, notify=_notify
+        settings,
+        dry_run=args.dry_run,
+        use_memory=not args.no_memory,
+        confirm=confirm,
+        handoff=handoff if interactive else None,
+        notify=_notify,
     )
     max_steps = 1 if args.dry_run and not args.max_steps else args.max_steps
     trace = args.trace.open("w", encoding="utf-8") if args.trace else None
@@ -390,6 +417,50 @@ def cmd_write(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+# ---- login -------------------------------------------------------------------------------------------------------
+def cmd_login(args: argparse.Namespace, settings: Settings) -> int:
+    import getpass
+
+    from .logins import LoginStore, mask
+    from .sites import page_host
+
+    store = LoginStore(settings.logins.index_path)
+    if args.login_command == "list":
+        logins = store.saved()
+        if not logins:
+            print("no saved logins. Add one with: jevosx login add github.com")
+        for login in logins:
+            print(f"  {login.host:<32} {login.username}")
+        return 0
+    if args.login_command == "remove":
+        gone = store.remove(args.site, args.username)
+        print(f"removed {len(gone)} login(s)" if gone else "nothing saved for that site")
+        return 0 if gone else 1
+    if args.login_command == "match":
+        host = page_host(args.url)
+        if host is None:
+            print("no: saved logins are only used on https pages (or http on this Mac)")
+            return 1
+        logins = store.for_url(args.url)
+        for login in logins:
+            print(f"  {login.host}: {mask(login.username)}")
+        if not logins:
+            print(f"no saved login matches {host}")
+        return 0 if logins else 1
+    username = args.username or input("username or email: ").strip()
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\n")
+    else:
+        password = getpass.getpass("password (hidden): ")
+        if getpass.getpass("again: ") != password:
+            print("the passwords differ; nothing saved", file=sys.stderr)
+            return 1
+    login = store.add(args.site, username, password)
+    print(f"saved {login.username} for {login.host} in the macOS Keychain (service {login.service})")
+    print(f'  try: jevosx run "log in to {login.host}"   (you approve before the password is typed)')
+    return 0
+
+
 # ---- doctor ------------------------------------------------------------------------------------------------------
 def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     failures = 0
@@ -465,6 +536,16 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     print(f"  {mark} writer for free-form text: {status.describe()}")
     if status.hint and not status.available:
         print(f"      → optional: {status.hint}")
+    if settings.logins.enabled:
+        from .logins import LoginError, LoginStore, keychain
+
+        try:
+            keychain()
+            saved = LoginStore(settings.logins.index_path).saved()
+            hosts = ", ".join(sorted({x.host for x in saved})) or "none yet (jevosx login add github.com)"
+            print(f"  ✓ website logins in the macOS Keychain: {hosts}")
+        except LoginError as exc:
+            print(f"  – website logins: {exc}")
 
     if args.live and key:
         from .router.client import JevClient, choice_question

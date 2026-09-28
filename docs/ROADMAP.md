@@ -51,7 +51,7 @@ model output coordinates, commands or passwords.
   - `jevosx doctor` shows its state.
   - The demo console has a simulated writer.
 
-## Phase 2: logging in to websites (next)
+## Phase 2: logging in to websites (done)
 
 **Research.**
 - Passwords saved by Safari or Chrome can't be read by other apps (iCloud Keychain and Chrome's own store), and

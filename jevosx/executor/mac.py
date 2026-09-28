@@ -15,6 +15,8 @@ from typing import Any
 
 from ..config import ExecutorSettings
 from ..errors import AXError, StaleElementError
+from ..observer.walker import url_text
+from ..sites import host_matches, page_host
 from ..types import (
     CLICK,
     FOCUS_WINDOW,
@@ -84,8 +86,12 @@ class MacExecutor:
             if op == CLICK and action.element is not None:
                 result = self._click(action.element)
             elif op == TYPE_TEXT and action.element is not None and action.text is not None:
-                keys = obs.app.bundle_id in BROWSER_BUNDLES
-                result = self._type(action.element, action.text, secret=action.text_is_secret, prefer_keys=keys)
+                refusal = self._check_credential(action)
+                if refusal is not None:
+                    result = refusal
+                else:
+                    keys = obs.app.bundle_id in BROWSER_BUNDLES
+                    result = self._type(action.element, action.text, secret=action.text_is_secret, prefer_keys=keys)
             elif op == MENU and action.element is not None:
                 action.element.node.perform("AXPress")
                 result = ActionResult(True, "AXPress")
@@ -212,6 +218,35 @@ class MacExecutor:
                 retried = True
             time.sleep(0.05)
         return ActionResult(False, method, f"{app.name} did not become frontmost in time")
+
+    def _check_credential(self, action: Action) -> ActionResult | None:
+        """Last check before a saved login is typed: the field's own page must still be the saved site."""
+        element = action.element
+        assert element is not None
+        if action.secure_only and not element.secure:
+            return ActionResult(False, "refused", "a saved password only goes into a password field")
+        if action.require_host is None:
+            return None
+        host = page_host(self._page_url_of(element))
+        if host is None or not host_matches(action.require_host, host):
+            now = host or "a page that is not https"
+            return ActionResult(False, "refused", f"the field is on {now}, not {action.require_host}; nothing typed")
+        return None
+
+    @staticmethod
+    def _page_url_of(element: UIElement) -> str | None:
+        """AXURL of the web document that contains the element (the nearest AXWebArea above it)."""
+        node = element.node
+        for _ in range(80):
+            try:
+                node = node.get("AXParent")
+                if node is None:
+                    return None
+                if node.get("AXRole") == "AXWebArea":
+                    return url_text(node.get("AXURL"))
+            except (AXError, StaleElementError):
+                return None
+        return None
 
     # ---- helpers ------------------------------------------------------------------------------------------------
     def _activate(self, pid: int) -> None:

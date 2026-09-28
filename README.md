@@ -59,8 +59,8 @@ One decision cycle:
 2. **Recall.** Local memory finds finished runs with similar goals and similar screens. It maps what worked before
    (or had no effect) onto ids that are on screen now.
 3. **Decide.** One Jev request carries the state plus a set of discrete choice questions: which
-   **operation** (`CLICK`, `TYPE_TEXT`, `MENU`, `PRESS_KEY`, `SCROLL_*`, `OPEN_APP`, `FOCUS_WINDOW`, `WAIT`, `DONE`,
-   `BLOCKED`), and, speculatively in the same round trip, the **target** for each operation. Only the target head
+   **operation** (`CLICK`, `TYPE_TEXT`, `MENU`, `PRESS_KEY`, `SCROLL_*`, `OPEN_APP`, `FOCUS_WINDOW`, `ASK_USER`,
+   `WAIT`, `DONE`, `BLOCKED`), and, speculatively in the same round trip, the **target** for each operation. Only the target head
    of the chosen operation is validated and used.
 4. **Gate.** If Jev's confidence in the operation or in the chosen target is below the floor (0.65 by default),
    nothing runs. The fallback policy re-observes, asks you, or stops, and the decision is written to a fallback log.
@@ -104,6 +104,8 @@ jevosx/
 │   ├── store.py         #   SQLite trajectories (WAL, versioned schema, JSONL export/import, prune)
 │   ├── embedding.py     #   deterministic hashed n-gram embeddings (numpy, no downloads)
 │   └── retriever.py     #   similarity retrieval → actionable hints mapped to current ids
+├── logins.py            # saved website logins: Keychain storage, site-bound username/password slots
+├── sites.py             # host names, https pages and which hosts a saved login may be used on
 ├── agent.py             # the loop: observe → recall → decide → gate → guard → act → settle → learn
 ├── config.py            # typed settings (TOML + .env + environment), strict validation
 ├── types.py             # shared data model (UIElement, Observation, Action, …)
@@ -208,7 +210,10 @@ window, top options, confidence, floor and resolution. You can also pass your ow
 - Deny-listed apps (Keychain Access and Passwords by default) are never operated.
 - Labels matching consequential patterns (delete, erase, trash, buy, pay, transfer, shut down, …) and `CMD_Q` need
   confirmation. When there is no terminal to confirm in, they are declined.
-- Password fields accept only secret text slots, and a text model is never used for them.
+- Password fields accept only secret text slots, and a writer is never used for them.
+- Saved logins: a password is typed only into a password field on its own site over https. Before typing, the
+  executor re-reads the field's page URL. Saved passwords never reach Jev, the writer, memory, logs or history,
+  and usernames are masked in all of them.
 - The Apple menu is never offered.
 - Right before execution the target is re-validated (same frontmost app, same role, still enabled). A stale target
   is re-observed, never guessed.
@@ -338,6 +343,32 @@ jevosx write --check                     # is Apple's model ready? If not, it sa
 
 The writer never fills password fields. It gets screen text as context only, and it composes each field once per
 run, so a retry types the same text instead of a new poem. Goals that name the text (`type "hello"`) never use it.
+
+### Logging in to websites
+
+```bash
+jevosx login add github.com              # asks for the username and the password (hidden input)
+jevosx run "log in to github.com"        # you approve before the password is typed
+jevosx login list                        # sites and usernames; passwords are never shown
+jevosx login remove github.com
+```
+
+Passwords go into the macOS login Keychain (service `jevosx:github.com`). `~/.jevosx/logins.json` only lists sites
+and usernames. During a run a saved login becomes two text slots, `login_username` and `login_password`, which
+exist only while the page on screen is that site over https:
+
+- The page address comes from the browser's accessibility tree (`AXURL`), not the address bar.
+- `github.com` also covers `www.github.com` and other subdomains, but never a look-alike such as
+  `github.com.evil.io`. Shared-hosting domains (`github.io`, `vercel.app`, …) match their exact host only.
+- Save the login under the site of the sign-in page: `google.com` covers `accounts.google.com`.
+
+Jev sees `•••••• (saved password for github.com)`, never the password. The password may only go into a password
+field; you approve it first (`safety.confirm_credentials`); and the executor re-checks the field's own page URL just
+before typing.
+
+For what only you can do (a two-factor code, a CAPTCHA, a passkey or Touch ID prompt), Jev picks `ASK_USER`.
+In the terminal the run pauses until you press Enter. In the console a **Your turn** card appears with
+**Done, continue** and **Stop the run**. After a handoff, Jev looks at the screen again and carries on.
 
 ### Python API
 

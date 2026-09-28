@@ -128,6 +128,7 @@ class SafetySettings:
     confirm_keys: list[str] = field(default_factory=lambda: ["CMD_Q"])
     deny_keys: list[str] = field(default_factory=list)
     confirm_all: bool = False
+    confirm_credentials: bool = True  # ask before typing a saved password (see [logins])
 
 
 @dataclass
@@ -146,6 +147,7 @@ class AgentSettings:
     stuck_after: int = 3
     history_size: int = 8
     max_done_rejections: int = 2
+    max_handoffs: int = 3  # ASK_USER hand-offs (2FA codes, CAPTCHAs…) per run
 
 
 @dataclass
@@ -174,6 +176,14 @@ class WriterSettings:
 
 
 @dataclass
+class LoginSettings:
+    """Saved website logins (`jevosx login add github.com`): passwords in the macOS Keychain, never in files."""
+
+    enabled: bool = True
+    index_path: str = "~/.jevosx/logins.json"  # hosts and usernames only
+
+
+@dataclass
 class KeySettings:
     custom: dict[str, str] = field(default_factory=dict)  # e.g. {"SEND" = "cmd+shift+d"}
     disabled: list[str] = field(default_factory=list)
@@ -189,6 +199,7 @@ class Settings:
     agent: AgentSettings = field(default_factory=AgentSettings)
     text_model: TextModelSettings = field(default_factory=TextModelSettings)
     writer: WriterSettings = field(default_factory=WriterSettings)
+    logins: LoginSettings = field(default_factory=LoginSettings)
     keys: KeySettings = field(default_factory=KeySettings)
 
     @classmethod

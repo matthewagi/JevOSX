@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import TextUnavailableError
@@ -75,6 +75,7 @@ class TextSlot:
     host: str | None = None
     label: str | None = None  # shown instead of the value in previews, history and logs
     secure_only: bool = False
+    fetch: Callable[[], str | None] | None = field(default=None, compare=False, repr=False)  # read at typing time
 
     @property
     def secret(self) -> bool:
@@ -83,7 +84,7 @@ class TextSlot:
     @property
     def preview(self) -> str:
         if self.secret:
-            return "••••••"
+            return f"•••••• ({self.label})" if self.label else "••••••"
         return self.label or clean_text(self.value, 60)
 
 
@@ -117,6 +118,17 @@ class TextSource:
     def available(self) -> bool:
         return bool(self.slots) or self.generate
 
+    def set_credentials(self, slots: Iterable[TextSlot]) -> None:
+        """Replace the site-bound login slots (they follow the page on screen, see jevosx.logins)."""
+        for name in [name for name, slot in self.slots.items() if slot.host is not None]:
+            del self.slots[name]
+        for slot in slots:
+            self.slots[slot.name] = slot
+
+    def sensitive_values(self) -> list[str]:
+        """Values of site-bound slots that are not secret (usernames): masked wherever the state shows them."""
+        return [s.value for s in self.slots.values() if s.host is not None and not s.secret and len(s.value) >= 3]
+
     def options(self) -> dict[str, dict[str, Any]]:
         """Criteria for the `text_slot` question."""
         options: dict[str, dict[str, Any]] = {
@@ -142,7 +154,10 @@ class TextSource:
         """The text for the chosen option (a prepared slot, or the writer's composition)."""
         if option in self.slots:
             slot = self.slots[option]
-            return ResolvedText(slot.value, slot.secret, f"slot:{slot.name}", slot.label, slot.host, slot.secure_only)
+            value = slot.fetch() if slot.fetch is not None else slot.value
+            if not value:
+                raise TextUnavailableError(f"{slot.label or slot.name} is not available (missing from the Keychain?)")
+            return ResolvedText(value, slot.secret, f"slot:{slot.name}", slot.label, slot.host, slot.secure_only)
         if self.generate and self.writer is not None and (option == GENERATE or not self.slots):
             if element.secure:
                 raise TextUnavailableError("refusing to generate text for a password field")

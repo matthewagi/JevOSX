@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ..config import SafetySettings
+from ..sites import host_matches, page_host
 from ..types import (
     CONSOLE_SAFE_KEYS,
     CONSOLE_SAFE_MENU,
@@ -40,7 +41,9 @@ class SafetyPolicy:
         self._confirm_keys = {k.upper() for k in self.settings.confirm_keys}
         self._deny_keys = {k.upper() for k in self.settings.deny_keys}
 
-    def check(self, action: Action, frontmost: AppInfo, *, window_title: str | None = None) -> SafetyVerdict:
+    def check(
+        self, action: Action, frontmost: AppInfo, *, window_title: str | None = None, page_url: str | None = None
+    ) -> SafetyVerdict:
         if is_console_window(window_title) and action.operation != OPEN_APP:
             if action.element is not None and action.element.kind != "menu_item":
                 return SafetyVerdict("deny", "never acts inside the JevOSX console window")
@@ -73,9 +76,29 @@ class SafetyPolicy:
             and not action.text_is_secret
         ):
             return SafetyVerdict("deny", "only secret text slots may be typed into password fields")
+        if action.operation == TYPE_TEXT and action.element is not None:
+            verdict = self._credential(action, page_url)
+            if verdict is not None:
+                return verdict
         if self.settings.confirm_all:
             return SafetyVerdict("confirm", "confirm_all is enabled")
         return SafetyVerdict("allow")
+
+    def _credential(self, action: Action, page_url: str | None) -> SafetyVerdict | None:
+        """Saved logins: only on their own site, only in web pages, passwords only into password fields."""
+        element = action.element
+        assert element is not None
+        if action.secure_only and not element.secure:
+            return SafetyVerdict("deny", "a saved password may only be typed into a password field")
+        if action.require_host is None:
+            return None
+        host = page_host(page_url)
+        if not element.in_web_area or host is None or not host_matches(action.require_host, host):
+            where = host or "a page that is not https"
+            return SafetyVerdict("deny", f"the login saved for {action.require_host} is not used on {where}")
+        if action.secure_only and self.settings.confirm_credentials:
+            return SafetyVerdict("confirm", f"type your saved password for {action.require_host} into this field")
+        return None
 
     def _denied_app(self, app: AppInfo) -> bool:
         return (app.bundle_id or "").lower() in self._deny_apps or app.name.lower() in self._deny_apps

@@ -13,6 +13,7 @@ from typing import Any
 
 from ..executor.keys import KeyBinding
 from ..types import (
+    ASK_USER,
     BLOCKED,
     CLICK,
     CONSOLE_SAFE_KEYS,
@@ -43,6 +44,7 @@ HEADS = {
     SCROLL_DOWN: "scroll_target",
     OPEN_APP: "app_target",
     FOCUS_WINDOW: "window_target",
+    ASK_USER: "handoff_reason",
 }
 OPERATION_TEXT = {
     CLICK: "Press or click an on-screen element: button, link, checkbox, tab, row, open-menu item, or focus a field.",
@@ -53,9 +55,21 @@ OPERATION_TEXT = {
     SCROLL_UP: "Scroll a scrollable area up.",
     OPEN_APP: "Open or switch to another application.",
     FOCUS_WINDOW: "Bring another window of the frontmost app to the front.",
+    ASK_USER: "Hand control to the user for a step only they can do here (a verification code, a CAPTCHA, a passkey "
+    "or Touch ID prompt, or information the goal does not give). The run continues after they finish.",
     WAIT: "Wait briefly for loading or an animation to finish.",
     DONE: "Every part of the goal is visibly complete.",
     BLOCKED: "No offered operation can make progress (missing information, permission, or control).",
+}
+
+# Why the user is needed (ASK_USER). A typed choice: Jev picks the reason, it never writes the message.
+HANDOFF_REASONS = {
+    "code": "type a verification, two-factor or one-time code",
+    "captcha": "solve a CAPTCHA or an 'are you human' check",
+    "approve": "approve a passkey, Touch ID, security key or system password prompt",
+    "login": "sign in (no saved login fits this site)",
+    "info": "provide information the goal does not include",
+    "other": "do something else only the user can do",
 }
 
 _WORD = re.compile(r"\w+")
@@ -117,6 +131,8 @@ class Target:
             return f'window "{self.window.title}"'
         if self.key is not None:
             return f"{self.key.id} ({self.key.chord})"
+        if "need" in self.criterion:
+            return f"to {self.criterion['need']}"
         return self.id
 
 
@@ -166,6 +182,7 @@ class ActionSpace:
         max_choices: int = 200,
         goal: str = "",
         offer_installed_apps: str = "mentioned",
+        handoff: bool = False,
     ) -> ActionSpace:
         heads: dict[str, dict[str, Target]] = {}
 
@@ -239,8 +256,12 @@ class ActionSpace:
                 Target(f"w{window.index}", criterion, "win:" + normalize_key(window.title), window=window),
             )
 
+        if handoff and not console:
+            for reason, need in HANDOFF_REASONS.items():
+                add(HEADS[ASK_USER], Target(reason, {"need": need}, "ask:" + reason))
+
         operations: dict[str, str] = {}
-        for op in (CLICK, TYPE_TEXT, MENU, PRESS_KEY, SCROLL_DOWN, SCROLL_UP, OPEN_APP, FOCUS_WINDOW):
+        for op in (CLICK, TYPE_TEXT, MENU, PRESS_KEY, SCROLL_DOWN, SCROLL_UP, OPEN_APP, FOCUS_WINDOW, ASK_USER):
             if heads.get(HEADS[op]):
                 operations[op] = OPERATION_TEXT[op]
         for op in (WAIT, DONE, BLOCKED):

@@ -10,16 +10,18 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar, cast
+from urllib.parse import urlsplit
 
 from ..errors import RouterContractError
 from ..executor.keys import KeyBinding
-from ..types import CLICK, TYPE_TEXT, Observation, is_console_window
+from ..types import CLICK, TYPE_TEXT, Observation, clean_text, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
 from .prompts import MEMORY, NEXT_ACTION, TARGET, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
 from .text import GENERATE, TextSource
 
+T = TypeVar("T")
 TEXT_SLOT_HEAD = "text_slot"
 CONSOLE_NOTE = (
     "The focused window is the JevOSX console that sends you commands; never act inside it. For web tasks open a "
@@ -114,7 +116,7 @@ class JevRouter:
             offer_installed_apps=settings.offer_installed_apps,
         )
 
-    def space(self, obs: Observation, text_source: TextSource, goal: str = "") -> ActionSpace:
+    def space(self, obs: Observation, text_source: TextSource, goal: str = "", *, handoff: bool = False) -> ActionSpace:
         return ActionSpace.build(
             obs,
             keys=self.keys,
@@ -122,6 +124,7 @@ class JevRouter:
             max_choices=self.max_choices,
             goal=goal,
             offer_installed_apps=self.offer_installed_apps,
+            handoff=handoff,
         )
 
     def build_request(
@@ -162,6 +165,7 @@ class JevRouter:
             options = text_source.options()
             if len(options) >= 2:
                 questions[TEXT_SLOT_HEAD] = choice_question(options, {"goal": goal, "rules": TEXT_SLOT})
+        redact(questions, text_source.sensitive_values())
         validate_request(state, questions, space)
         return state, questions
 
@@ -226,6 +230,9 @@ def build_state(
         "window": obs.window.title if obs.window else None,
         "focused_element": focused.describe() if focused else None,
     }
+    page = page_summary(obs.page_url)
+    if page:
+        desktop["page"] = page
     others = [w.title for w in obs.windows if not w.focused][:8]
     if others:
         desktop["other_windows"] = others
@@ -247,7 +254,39 @@ def build_state(
         if text_source.generate:
             slots[GENERATE] = "a writer composes the new text the goal asks for, for the field TYPE_TEXT chooses"
         state["text_slots"] = slots
+    if text_source is not None:
+        redact(state, text_source.sensitive_values())
     return state
+
+
+def page_summary(url: str | None) -> str | None:
+    """Scheme, host and path of the page on screen; query strings and fragments (tokens, ids) are dropped."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https", "file") or not (parts.netloc or parts.path):
+        return None
+    return clean_text(f"{parts.scheme}://{parts.netloc}{parts.path}", 120)
+
+
+def redact(payload: T, values: Sequence[str]) -> T:
+    """Mask saved-login usernames in every string of a state or question payload (in place for dicts/lists)."""
+    if not values:
+        return payload
+    if isinstance(payload, str):
+        text: str = payload
+        for value in values:
+            text = text.replace(value, "•••")
+        return cast(T, text)
+    if isinstance(payload, dict):
+        for key, item in payload.items():
+            payload[key] = redact(item, values)
+    elif isinstance(payload, list):
+        payload[:] = [redact(item, values) for item in payload]
+    return payload
 
 
 def state_size(state: Mapping[str, Any]) -> int:

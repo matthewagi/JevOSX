@@ -58,6 +58,7 @@ deny_apps = ["com.apple.keychainaccess", "com.apple.Passwords"]
 confirm_keys = ["CMD_Q"]
 deny_keys = []
 confirm_all = false
+confirm_credentials = true         # ask before typing a saved password
 
 [agent]
 max_steps = 40
@@ -70,6 +71,7 @@ max_stale_retries = 3
 stuck_after = 3                    # consecutive actions with no visible change → blocked
 history_size = 8
 max_done_rejections = 2
+max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
 
 [writer]
 # Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).
@@ -81,6 +83,12 @@ temperature = 0.7
 max_tokens = 800
 timeout_s = 60.0
 helper_dir = "~/.jevosx/bin"
+
+[logins]
+# Saved website logins: `jevosx login add github.com` puts the password in the macOS Keychain.
+# A login is only offered on its own site over https, and the password only goes into password fields.
+enabled = true
+index_path = "~/.jevosx/logins.json"  # hosts and usernames only, never passwords
 
 [text_model]
 # Optional OpenAI-compatible model, used as the writer when configured (see [writer]).

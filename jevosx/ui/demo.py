@@ -54,23 +54,28 @@ class Spec:
     focused: bool = False
     enabled: bool = True
     selected: bool | None = None
+    web: bool = False  # inside the web page (not the browser's toolbar)
 
     def build(self, index: int) -> UIElement:
         text_input = self.role in ("AXTextField", "AXTextArea")
         ops = TEXT_OPS if text_input else ((CLICK,) if self.role != "AXStaticText" else ())
+        secure = self.subrole == "AXSecureTextField"
         return UIElement(
             index=index,
             role=self.role,
             subrole=self.subrole,
             label=self.label,
-            value=self.value,
+            value=None if secure else self.value,
             kind="text_input" if text_input else "row" if self.role == "AXRow" else "control",
             ops=ops if self.enabled else (),
             enabled=self.enabled,
             focused=self.focused,
             selected=self.selected,
+            secure=secure,
+            filled=bool(self.value) if secure else None,
             container=self.container,
-            value_settable=text_input,
+            in_web_area=self.web,
+            value_settable=text_input and not secure,
         )
 
 
@@ -80,6 +85,9 @@ class DemoApp:
 
     def title(self) -> str:
         return self.name
+
+    def url(self) -> str | None:
+        return None
 
     def specs(self) -> list[Spec]:
         return []
@@ -252,16 +260,59 @@ class Safari(DemoApp):
     name, bundle_id = "Safari", "com.apple.Safari"
     FAVORITES = ("Apple", "Wikipedia", "GitHub")
 
+    DEMO_LOGIN = ("octocat", "demo-password-123")  # matches the demo console's simulated Keychain entry
+
     def __init__(self) -> None:
         self.address = ""
         self.page = "Start Page"
         self.results: list[str] = []
+        self.login = ""  # "" | form | 2fa | done: the simulated github.com sign-in
+        self.username = ""
+        self.password = ""
+        self.error = ""
 
     def title(self) -> str:
         return self.page
 
+    def url(self) -> str | None:
+        if self.login == "form":
+            return "https://github.com/login"
+        if self.login == "2fa":
+            return "https://github.com/sessions/two-factor/app"
+        if self.login == "done":
+            return "https://github.com/"
+        if self.results:
+            return f"https://www.google.com/search?q={self.address.replace(' ', '+')}"
+        return None if self.page == "Start Page" else f"https://{self.page}/"
+
+    def _sign_in_specs(self) -> list[Spec]:
+        page = f'web page "{self.page}"'
+        if self.login == "form":
+            return [
+                Spec("AXTextField", "Username or email address", value=self.username, container=page, web=True),
+                Spec(
+                    "AXTextField",
+                    "Password",
+                    subrole="AXSecureTextField",
+                    value=self.password,
+                    container=page,
+                    web=True,
+                ),
+                Spec("AXButton", "Sign in", container=page, web=True),
+                Spec("AXLink", "Forgot password?", container=page, web=True),
+            ]
+        if self.login == "2fa":
+            return [
+                Spec("AXTextField", "Authentication code", container=page, web=True),
+                Spec("AXButton", "Verify", container=page, web=True),
+            ]
+        return [Spec("AXLink", name, container=page, web=True) for name in ("Repositories", "Pull requests", "Issues")]
+
     def specs(self) -> list[Spec]:
         links = self.results or [f"Favorites: {f}" for f in self.FAVORITES]
+        content = self._sign_in_specs() if self.login else [
+            Spec("AXLink", link, container=f'web page "{self.page}"', web=True) for link in links
+        ]  # fmt: skip
         return [
             Spec("AXButton", "Back", container="toolbar", enabled=self.page != "Start Page"),
             Spec(
@@ -273,13 +324,19 @@ class Safari(DemoApp):
                 focused=self.page == "Start Page",
             ),  # fmt: skip
             Spec("AXButton", "Share", container="toolbar"),
-            *(Spec("AXLink", link, container=f'web page "{self.page}"') for link in links),
+            *content,
         ]
 
     def menu(self) -> list[tuple[str, str | None]]:
         return [("File › New Tab", "⌘T"), ("File › New Window", "⌘N"), ("History › Home", "⇧⌘H")]
 
     def text(self) -> str:
+        if self.login == "form":
+            return "Sign in to GitHub" + (f" · {self.error}" if self.error else "")
+        if self.login == "2fa":
+            return "Two-factor authentication · Open your authenticator app and enter the 6-digit code"
+        if self.login == "done":
+            return f"Signed in as {self.username} · Dashboard · Recent activity"
         if self.page == "Start Page":
             return "Favorites · Frequently Visited · Privacy Report"
         if self.results:
@@ -290,7 +347,9 @@ class Safari(DemoApp):
         query = self.address.strip()
         if not query:
             return "nothing to load"
-        if re.fullmatch(r"[\w-]+(\.[\w-]+)+(/\S*)?", query):
+        if re.fullmatch(r"(?:https?://)?(?:www\.)?github\.com(?:/\S*)?", query):
+            self.page, self.results, self.login, self.error = "Sign in to GitHub · GitHub", [], "form", ""
+        elif re.fullmatch(r"[\w-]+(\.[\w-]+)+(/\S*)?", query):
             self.page, self.results = query, []
         else:
             self.page = f"{query} - Search"
@@ -301,16 +360,35 @@ class Safari(DemoApp):
         if label == "Back":
             self.__init__()  # type: ignore[misc]
             return "back"
+        if label == "Sign in" and self.login == "form":
+            if (self.username, self.password) == self.DEMO_LOGIN:
+                self.login, self.page, self.error = "2fa", "Two-factor authentication · GitHub", ""
+                return "asked for a two-factor code"
+            self.error = "Incorrect username or password."
+            return "sign-in failed"
+        if self.login:
+            return "clicked"
         name = label.removeprefix("Favorites: ")
         self.page, self.results, self.address = name, [], name.lower().replace(" ", "") + ".com"
         return f"opened {name}"
 
     def type(self, label: str, text: str) -> str:
-        self.address = text
+        if label == "Username or email address":
+            self.username = text
+        elif label == "Password":
+            self.password = text
+        elif label == "Authentication code":
+            return "typed (the code is only on your phone)"
+        else:
+            self.address = text
         return "typed"
 
     def key(self, key_id: str) -> str:
         return self._load() if key_id == "RETURN" else "no effect"
+
+    def user_enters_code(self) -> None:
+        if self.login == "2fa":
+            self.login, self.page = "done", "GitHub"
 
 
 class Notes(DemoApp):
@@ -427,7 +505,14 @@ class DemoDesktop:
                 "simulated": True,
             },  # fmt: skip
             captured_at=time.time(),
+            page_url=app.url(),
         )
+
+    def user_completes_handoff(self) -> None:
+        """What the person does during ASK_USER in the demo: types the two-factor code from their phone."""
+        safari = self.apps["Safari"]
+        if isinstance(safari, Safari):
+            safari.user_enters_code()
 
     def quick_signature(self) -> str:
         app = self.apps[self.front]
@@ -603,9 +688,14 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     mentioned = next((n for n in DEMO_APP_NAMES if re.search(rf"\b{n.lower()}\b", lowered)), None)
     wanted = _infer_app(lowered, mentioned)
     wants_save = bool(re.search(r"\bsave\b", lowered))
-    wants_submit = bool(re.search(r"\b(search|go to|visit|look (?:up|for)|google|browse)\b", lowered))
+    wants_login = bool(re.search(r"\b(?:log\s*in|sign\s*in)\b", lowered))
+    wants_submit = bool(
+        re.search(r"\b(search|go to|visit|look (?:up|for)|google|browse|log\s*in|sign\s*in)\b", lowered)
+    )
     wants_delete = bool(re.search(r"\b(delete|remove|trash)\b", lowered))
-    typing = bool(re.search(r"\b(type|write|enter|search|look|google|fill|put|say|add|go to|visit)\b", lowered))
+    typing = bool(
+        re.search(r"\b(type|write|enter|search|look|google|fill|put|say|add|go to|visit|log\s*in|sign\s*in)\b", lowered)
+    )
     named = re.search(r"\bsave\s+(?:it\s+|this\s+|the\s+\w+\s+)?as\s+[\"“]([^\"”]+)", goal, re.IGNORECASE)
     file_name = named.group(1) if wants_save and named else quotes[-1] if wants_save and len(quotes) > 1 else None
     body_quotes = [q for q in quotes if q != file_name] if typing else []
@@ -615,7 +705,11 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     compose = wants_writing and not any(a.startswith("TYPE_TEXT") and '"save as"' not in a.lower() for a in effective)
     saving = any("sheet" in str(e.get("in", "")) for e in elements)
     saved = not saving and window not in ("untitled", "open") and (file_name is None or file_name.lower() == window)
-    submitted = not wants_submit or any(q.lower() in window for q in quotes) or "results for" in seen
+    page = str(desktop.get("page") or "").lower()
+    submitted = (
+        not wants_submit or any(q.lower() in window or q.lower() in page for q in quotes) or "results for" in seen
+    )
+    signed_in = "signed in as" in seen
     deleted = any(a.startswith("CLICK") and '"delete"' in a.lower() for a in effective)
     touched = any(a.startswith(("CLICK", "MENU", "PRESS_KEY")) for a in effective)
     only_open = wanted is not None and not (_words(goal) - {wanted.lower()})
@@ -632,12 +726,33 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
 
     # 2. Finished?
     finished = not pending and not compose and submitted and (not wants_save or saved) and (not wants_delete or deleted)
+    finished = finished and (not wants_login or signed_in)
     if (
         finished
         and wanted in (None, front)
         and (body_quotes or wants_writing or wants_save or wants_submit or wants_delete or touched or only_open)
     ):
         return answer("DONE", 0.93)
+
+    # 2b. Sign in: saved username and password (offered only on the right site), then hand 2FA to the person.
+    if wants_login and submitted and not signed_in:
+        by_label = {e["label"].lower(): e for e in elements}
+        slots_offered = questions.get("text_slot", {}).get("criteria", {})
+        if "authentication code" in by_label and "ASK_USER" in ops:
+            return answer("ASK_USER", 0.9, handoff_reason=("code", 0.93))
+        if "password" in by_label and TYPE_TEXT in ops and slots_offered:
+            fields = questions.get("type_text_target")
+            username = by_label.get("username or email address", {})
+            user_id = _find(fields, lambda label: label.startswith("username"))
+            if not username.get("value") and "login_username" in slots_offered and user_id:
+                return answer(TYPE_TEXT, 0.9, type_text_target=(user_id, 0.92), text_slot=("login_username", 0.95))
+            password_id = _find(fields, lambda label: label == "password")
+            typed_password = "filled" in by_label["password"].get("state", [])
+            if not typed_password and "login_password" in slots_offered and password_id:
+                return answer(TYPE_TEXT, 0.9, type_text_target=(password_id, 0.92), text_slot=("login_password", 0.95))
+            pick = click(lambda label: label == "sign in")
+            if pick:
+                return pick
 
     # 3. Delete: select the named item first, then press Delete (the safety policy asks the human).
     if wants_delete and not deleted:

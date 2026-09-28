@@ -7,6 +7,7 @@ and prunes subtrees that lie outside the visible window/scroll clip (so off-scre
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -143,6 +144,7 @@ class WalkResult:
     elapsed_ms: float
     notes: list[str] = field(default_factory=list)
     skipped: dict[str, int] = field(default_factory=dict)  # why subtrees were pruned (diagnostics)
+    page_url: str | None = None  # AXURL of the outermost web area (the page in a browser window)
 
 
 @dataclass(slots=True)
@@ -189,6 +191,15 @@ def display_value(role: str, subrole: str | None, value: Any, *, secure: bool, l
     return text or None
 
 
+def url_text(value: Any) -> str | None:
+    """AXURL arrives as an NSURL through pyobjc (and as a string from fakes)."""
+    if value is None:
+        return None
+    absolute = getattr(value, "absoluteString", None)
+    text = str(absolute() if callable(absolute) else value).strip()
+    return text or None
+
+
 def own_label(attrs: dict[str, Any], *, text_input: bool) -> str:
     for key in ("AXTitle", "AXDescription"):
         text = clean_text(attrs.get(key), 120)
@@ -232,6 +243,7 @@ class TreeWalker:
         truncated = False
         notes: list[str] = []
         skipped: dict[str, int] = {}
+        page_url: str | None = None
 
         def skip(reason: str) -> None:
             skipped[reason] = skipped.get(reason, 0) + 1
@@ -271,6 +283,9 @@ class TreeWalker:
                 parent_scroll.label = friendly_role(role, subrole) + (f' "{child_name}"' if child_name else "")
 
             enabled = attrs.get("AXEnabled") is not False
+            if role == "AXWebArea" and page_url is None and not frame.in_web:
+                with contextlib.suppress(StaleElementError):
+                    page_url = url_text(frame.node.get("AXURL"))
 
             if role in TEXT_ROLES:
                 text = clean_text(attrs.get("AXValue") or attrs.get("AXTitle") or attrs.get("AXDescription"), 300)
@@ -398,6 +413,7 @@ class TreeWalker:
             elapsed_ms=round((self.clock() - started) * 1000, 1),
             notes=notes,
             skipped=skipped,
+            page_url=page_url,
         )
 
     # ------------------------------------------------------------------------------------------------------------
@@ -449,6 +465,12 @@ class TreeWalker:
             return None
         if not enabled:
             ops = ()
+        filled: bool | None = None
+        if secure:  # never read the text itself: only whether there is some (bullets or a character count)
+            filled = bool(attrs.get("AXValue"))
+            if not filled:
+                with contextlib.suppress(StaleElementError, TypeError, ValueError):
+                    filled = int(node.get("AXNumberOfCharacters") or 0) > 0
         selected = attrs.get("AXSelected")
         expanded = attrs.get("AXExpanded")
         identifier = attrs.get("AXIdentifier")
@@ -467,6 +489,7 @@ class TreeWalker:
             checked=checked_state(role, subrole, attrs.get("AXValue")),
             expanded=bool(expanded) if isinstance(expanded, bool | int) else None,
             secure=secure,
+            filled=filled,
             container=frame.container,
             identifier=identifier,
             in_web_area=frame.in_web,

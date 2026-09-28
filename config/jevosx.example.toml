@@ -53,7 +53,7 @@ store_typed_text = false
 keep_episodes = 5000
 
 [safety]
-confirm_patterns = ['\bdelete\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b']
+confirm_patterns = ['\bdelete\b', '\bsend\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b']
 deny_apps = ["com.apple.keychainaccess", "com.apple.Passwords"]
 confirm_keys = ["CMD_Q"]
 deny_keys = []

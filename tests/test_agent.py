@@ -310,3 +310,12 @@ def test_leaving_the_console_is_not_held_back_but_content_actions_are(tmp_path):
     with agent:
         assert agent.run("look for pictures of flowers red").status == "low_confidence"
     assert desktop.executed == []
+
+
+def test_sending_needs_confirmation_by_default():
+    from jevosx.executor.safety import SafetyPolicy
+    from jevosx.types import Action
+
+    send = element(3, "AXButton", "Send")
+    mail = AppInfo("Mail", "com.apple.mail", pid=9)
+    assert SafetyPolicy().check(Action("CLICK", element=send), mail).verdict == "confirm"

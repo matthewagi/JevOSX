@@ -105,6 +105,7 @@ class SafetySettings:
     confirm_patterns: list[str] = field(
         default_factory=lambda: [
             r"\bdelete\b",
+            r"\bsend\b",
             r"\berase\b",
             r"\btrash\b",
             r"\bdiscard\b",

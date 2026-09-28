@@ -311,10 +311,10 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const OP_COLOR = { CLICK: "--op-click", TYPE_TEXT: "--op-type", MENU: "--op-menu", PRESS_KEY: "--op-key",
   OPEN_APP: "--op-app", FOCUS_WINDOW: "--op-app", SCROLL_UP: "--op-scroll", SCROLL_DOWN: "--op-scroll",
-  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn" };
+  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn", PLAN: "--accent-2" };
 const STATUS_TEXT = { acted: "executed", wait: "waited", done: "goal complete", blocked: "blocked", denied: "refused by safety",
   declined: "declined", stale: "UI changed, re-observed", low_confidence: "withheld (low confidence)", failed: "failed",
-  handoff: "handed to you" };
+  handoff: "handed to you", plan: "outline from the on-device model" };
 const RUN_TEXT = { running: "Running", success: "Verified", done: "Done", blocked: "Blocked", low_confidence: "Low confidence",
   failed: "Failed", max_steps: "Out of steps", aborted: "Stopped", error: "Error" };
 const EXAMPLES = [
@@ -391,7 +391,7 @@ async function refreshStatus() {
     if (!state.initialized) {
       state.initialized = true; state.floor = s.defaults.min_confidence; state.policy = s.defaults.low_confidence_policy;
       $("#opt-floor").value = state.floor; $("#opt-floor-v").textContent = Number(state.floor).toFixed(2); setPolicy(state.policy);
-      if (s.demo) $("#welcome-text").textContent = "Demo mode: a simulated Mac (Finder, TextEdit, Safari, Notes) and a simulated " +
+      if (s.demo) $("#welcome-text").textContent = "Demo mode: a simulated Mac (Finder, TextEdit, Safari with a sign-in page, Notes, and a game that draws its own interface) and a simulated " +
         "decision model stand in for the real thing, so you can try the full loop here. Start with `jevosx ui` (no --demo) on your Mac to drive real apps.";
     }
   } catch (e) { logLine("status", e.message, "e"); }

@@ -17,7 +17,7 @@ from ..errors import RouterContractError
 from ..executor.keys import KeyBinding
 from ..types import CLICK, TYPE_TEXT, Observation, clean_text, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
-from .prompts import MEMORY, NEXT_ACTION, TARGET, TEXT_SLOT
+from .prompts import MEMORY, NEXT_ACTION, PLAN, TARGET, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
 from .text import GENERATE, TextSource
 
@@ -136,14 +136,20 @@ class JevRouter:
         text_source: TextSource,
         history: Sequence[Mapping[str, Any]] = (),
         hints: Sequence[Mapping[str, Any]] = (),
+        plan: Sequence[str] = (),
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         state = build_state(
-            obs, history=history, hints=hints, text_source=text_source, include_disabled=self.include_disabled
+            obs,
+            history=history,
+            hints=hints,
+            text_source=text_source,
+            include_disabled=self.include_disabled,
+            plan=plan,
         )
         dropped = compact_state(state, self.max_state_bytes)
         if dropped:
             space.drop_elements(dropped)
-        rules = NEXT_ACTION + ("\n" + MEMORY if hints else "")
+        rules = NEXT_ACTION + ("\n" + MEMORY if hints else "") + ("\n" + PLAN if plan and "plan" in state else "")
         questions: dict[str, Any] = {
             "operation": choice_question(space.operations, {"goal": goal, "rules": rules}),
         }
@@ -205,8 +211,11 @@ class JevRouter:
         text_source: TextSource,
         history: Sequence[Mapping[str, Any]] = (),
         hints: Sequence[Mapping[str, Any]] = (),
+        plan: Sequence[str] = (),
     ) -> Decision:
-        state, questions = self.build_request(goal, obs, space, text_source=text_source, history=history, hints=hints)
+        state, questions = self.build_request(
+            goal, obs, space, text_source=text_source, history=history, hints=hints, plan=plan
+        )
         response = self.client.evaluate(state, questions)
         return self.decode(response, space, text_source)
 
@@ -218,6 +227,7 @@ def build_state(
     hints: Sequence[Mapping[str, Any]] = (),
     text_source: TextSource | None = None,
     include_disabled: bool = False,
+    plan: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The JSON state Jev sees. Labels, roles, values and states only: no coordinates, handles or screenshots.
 
@@ -249,6 +259,8 @@ def build_state(
     }
     if hints:
         state["memory_hints"] = list(hints)
+    if plan and not console:
+        state["plan"] = [f"{i}. {step}" for i, step in enumerate(plan, start=1)]
     if text_source is not None and (text_source.slots or text_source.generate):
         slots = {name: slot.preview for name, slot in text_source.slots.items()}
         if text_source.generate:

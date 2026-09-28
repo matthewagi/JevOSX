@@ -187,11 +187,20 @@ class AppleWriter:
             return WriterStatus("apple", True, "available", f"Apple on-device model, macOS {os_version}")
         return WriterUnavailable(reason if reason in REASONS else "unknown").status()
 
-    def generate(self, instructions: str, prompt: str, *, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        instructions: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
+        timeout = timeout_s or self.timeout_s
         request = {
             "instructions": instructions,
             "prompt": prompt,
-            "temperature": self.temperature,
+            "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
         try:
@@ -200,10 +209,10 @@ class AppleWriter:
                 input=json.dumps(request, ensure_ascii=False),
                 capture_output=True,
                 text=True,
-                timeout=self.timeout_s,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            raise TextUnavailableError(f"the on-device writer took longer than {self.timeout_s:.0f}s") from None
+            raise TextUnavailableError(f"the on-device writer took longer than {timeout:.0f}s") from None
         except OSError as exc:
             raise TextUnavailableError(f"cannot run the on-device writer: {exc}") from None
         answer = _last_json(completed.stdout)

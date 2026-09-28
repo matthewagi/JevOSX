@@ -32,12 +32,25 @@ class LLMTextWriter:
             timeout=timeout_s, headers={"Authorization": f"Bearer {api_key}"}, transport=transport
         )
 
-    def _complete(self, messages: list[dict[str, str]], *, max_tokens: int, json_mode: bool) -> str:
+    def _complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int,
+        json_mode: bool,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
         body: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens, "messages": messages}
+        if temperature is not None:
+            body["temperature"] = temperature
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         try:
-            response = self._http.post(self.url, json=body)
+            if timeout_s:
+                response = self._http.post(self.url, json=body, timeout=timeout_s)
+            else:
+                response = self._http.post(self.url, json=body)
         except httpx.HTTPError as exc:
             raise TextUnavailableError(f"text model unreachable ({type(exc).__name__}); nothing typed") from None
         if response.is_error:
@@ -65,11 +78,21 @@ class LLMTextWriter:
             raise TextUnavailableError("text model returned no usable value; nothing typed") from None
         return value
 
-    def generate(self, instructions: str, prompt: str, *, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        instructions: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
         return self._complete(
             [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
             max_tokens=max_tokens or 512,
             json_mode=False,
+            temperature=temperature,
+            timeout_s=timeout_s,
         )
 
     def close(self) -> None:

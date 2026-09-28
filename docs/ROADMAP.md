@@ -69,7 +69,8 @@ model output coordinates, commands or passwords.
   The password slot is masked for Jev (`••••••`).
 - The password may only be typed into a secure (password) field. The executor re-reads the field's page URL
   immediately before typing and refuses if the host changed, which protects against phishing and redirects.
-- The first entry of a password asks for approval (`safety.confirm_credentials`, on by default).
+- Every time a saved password is about to be typed, you approve it first (`safety.confirm_credentials`, on by
+  default).
 - Passwords never reach Jev, the writer, memory, logs or the run history. History shows `(saved password)`.
 - A new operation, `ASK_USER`, hands control to the human for what only they can do: 2FA codes, CAPTCHAs,
   passkeys and Touch ID. The reason is a typed choice (2fa · captcha · passkey · missing info · permission · other),
@@ -97,7 +98,7 @@ model output coordinates, commands or passwords.
   continues with the Accessibility tree alone.
 - `observer.vision = "always"` also OCRs rich apps (noisy, slower). `off` disables the feature.
 
-## Phase 4: planning and handoff (next)
+## Phase 4: planning and handoff (done)
 
 - **On-device plan.** For multi-part goals ("write a poem, save it as poem.rtf, then open it in Pages") the local
   model splits the goal into ordered steps once per run. The plan is sent to Jev as context: a suggested outline
@@ -127,6 +128,6 @@ model output coordinates, commands or passwords.
 | Apple Intelligence off, unsupported language, or model still downloading | `--check` reports the exact reason; `auto` falls back to the OpenAI-compatible model or to no writer. |
 | On-device model refuses (guardrails) | The error is surfaced as "writer declined"; the step fails and Jev picks something else. |
 | Wrong text for a field | Jev still chooses the field, and the writer never writes into password fields. The text is typed only after the confidence gate and safety checks. |
-| Password typed on the wrong site | https plus host binding, a secure-field-only rule, a live URL re-check before typing, and first-use approval. |
+| Password typed on the wrong site | https plus host binding, a secure-field-only rule, a live URL re-check before typing, and your approval every time. |
 | OCR misreads or clicks the wrong spot | OCR elements only appear when Accessibility has too little to offer; the confidence gate still applies; clicks land on the centre of a recognized text line. |
 | Screen Recording friction | Asked only when a custom-drawn app is actually in front; everything else keeps working without it. |

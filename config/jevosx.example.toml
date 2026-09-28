@@ -78,6 +78,7 @@ stuck_after = 3                    # consecutive actions with no visible change 
 history_size = 8
 max_done_rejections = 2
 max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
+plan = "auto"                      # auto: the writer's model outlines multi-part goals for Jev (context only) | off
 
 [writer]
 # Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).

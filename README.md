@@ -357,6 +357,12 @@ jevosx write --check                     # is Apple's model ready? If not, it sa
 The writer never fills password fields. It gets screen text as context only, and it composes each field once per
 run, so a retry types the same text instead of a new poem. Goals that name the text (`type "hello"`) never use it.
 
+**Plans for multi-part goals.** For a goal such as "write a poem about autumn, save it as poem.rtf, then open it in
+Pages", the same on-device model writes a short numbered outline once per run (`agent.plan = "auto"`). Jev gets the
+outline as a hint for ordering, and it shows up as step 0 (`PLAN`) in the terminal and console. It never becomes
+an action: every step is still a Jev choice among observed ids, and if no plan comes back the run simply goes on
+without one.
+
 ### Logging in to websites
 
 ```bash

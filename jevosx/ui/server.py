@@ -36,6 +36,7 @@ from ..errors import JevOSXError
 from ..executor.base import DryRunExecutor, Executor
 from ..logins import LoginStore
 from ..memory.store import MemoryStore
+from ..planner import Planner
 from ..router.policy import JevRouter, element_state
 from ..types import Action, Observation
 from ..writer import TextWriter, WriterStatus, create_writer
@@ -255,6 +256,8 @@ class RunManager:
             if self.demo:
                 settings.agent.fallback_log = ""
             settings.validate()
+            writer = components.text_writer
+            planner = Planner(writer) if writer is not None and settings.agent.plan == "auto" else None
             agent = Agent(
                 observer=components.observer,
                 executor=DryRunExecutor() if options.dry_run else components.executor,
@@ -262,6 +265,7 @@ class RunManager:
                 settings=settings,
                 memory=components.memory if options.use_memory else None,
                 text_writer=components.text_writer,
+                planner=planner,
                 logins=components.logins,
                 confirm=self._confirm,
                 handoff=self._handoff,

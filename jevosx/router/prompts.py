@@ -19,6 +19,10 @@ TARGET = """This question only chooses the target for the operation named in 'op
 whether that operation runs. Pick the offered target that best advances the goal given the current state and recent
 actions. Do not pick a field that already holds the requested value. Choose only an offered id."""
 
+PLAN = """plan is a suggested order of steps for this goal, written once by a small on-device model. It is a hint
+for ordering only: follow the current screen, skip steps that are already done, and ignore steps the goal did not
+ask for."""
+
 MEMORY = """memory_hints summarize what worked, or had no visible effect, in similar past runs on this Mac. They are
 weak evidence: follow one only when it fits the current state and the goal."""
 

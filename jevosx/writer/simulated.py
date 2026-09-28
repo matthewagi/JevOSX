@@ -34,7 +34,15 @@ class SimulatedWriter:
             return f"Hi,\n\nThanks for your note about {topic}. I'll take a look and get back to you today.\n\nBest,"
         return f"Notes on {topic}: a short draft written by the simulated writer."
 
-    def generate(self, instructions: str, prompt: str, *, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        instructions: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
         request = next((line[9:] for line in prompt.splitlines() if line.startswith("Request: ")), prompt)
         parts = [p.strip() for p in re.split(r",\s*|\s+(?:and then|then|and)\s+", request) if p.strip()]
         return "\n".join(f"{i}. {part[0].upper()}{part[1:]}" for i, part in enumerate(parts, start=1))

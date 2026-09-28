@@ -81,7 +81,7 @@ def test_demo_scenarios_complete(goal, check):
         run = run_to_end(manager, goal)
         assert run["status"] == "done", run
         assert check(desktop)
-        assert all(e["status"] in ("acted", "done") for e in run["events"])
+        assert all(e["status"] in ("acted", "done", "plan") for e in run["events"])
     finally:
         manager.close()
 

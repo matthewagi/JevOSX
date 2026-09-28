@@ -20,7 +20,15 @@ class TextWriter(Protocol):
         """Text for one field. Raises TextUnavailableError when nothing usable was produced."""
         ...
 
-    def generate(self, instructions: str, prompt: str, *, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        instructions: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
         """Raw completion (used by the planner)."""
         ...
 

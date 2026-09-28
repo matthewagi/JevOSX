@@ -153,6 +153,7 @@ class AgentSettings:
     history_size: int = 8
     max_done_rejections: int = 2
     max_handoffs: int = 3  # ASK_USER hand-offs (2FA codes, CAPTCHAs…) per run
+    plan: str = "auto"  # auto: the writer's model outlines multi-part goals once per run (context for Jev) | off
 
 
 @dataclass
@@ -263,6 +264,7 @@ class Settings:
             "writer.backend": (self.writer.backend, ("auto", "apple", "openai", "off")),
             "writer.offer": (self.writer.offer, ("auto", "always")),
             "observer.vision": (self.observer.vision, ("auto", "always", "off")),
+            "agent.plan": (self.agent.plan, ("auto", "off")),
         }
         for name, (value, allowed) in choices.items():
             if value not in allowed:

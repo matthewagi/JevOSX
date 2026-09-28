@@ -237,7 +237,7 @@ class FakeWriter:
         self.contexts.append(dict(context))
         return self.text
 
-    def generate(self, instructions, prompt, *, max_tokens=None):
+    def generate(self, instructions, prompt, *, max_tokens=None, temperature=None, timeout_s=None):
         return "1. step"
 
     def close(self):

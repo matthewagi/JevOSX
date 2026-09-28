@@ -602,9 +602,13 @@ class DemoDesktop:
         app = self.apps[self.front]
         op = action.operation
         if op == CLICK and action.element is not None:
-            detail, method = app.click(action.element.label), "AXPress (simulated)"
+            pointer = action.element.kind == "visual"
+            detail = app.click(action.element.label)
+            method = "pointer at the recognized text (simulated)" if pointer else "AXPress (simulated)"
         elif op == TYPE_TEXT and action.element is not None and action.text is not None:
-            detail, method = app.type(action.element.label, action.text), "AXValue (simulated)"
+            keys = action.element.kind == "keyboard" or action.element.secure
+            detail = app.type(action.element.label, action.text)
+            method = "keystrokes (simulated)" if keys else "AXValue (simulated)"
         elif op == MENU and action.element is not None:
             detail, method = app.command(action.element.label), "AXPress menu item (simulated)"
         elif op == PRESS_KEY and action.key is not None:

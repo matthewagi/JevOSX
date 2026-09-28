@@ -29,6 +29,7 @@ from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import Observer
+from .planner import Planner
 from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal
 from .types import (
@@ -156,6 +157,7 @@ class Agent:
         safety: SafetyPolicy | None = None,
         memory: MemoryStore | None = None,
         text_writer: TextWriter | None = None,
+        planner: Planner | None = None,
         logins: LoginStore | None = None,
         confirm: ConfirmFn | None = None,
         handoff: HandoffFn | None = None,
@@ -171,6 +173,7 @@ class Agent:
         self.memory = memory
         self.retriever = MemoryRetriever(memory, self.settings.memory) if memory is not None else None
         self.text_writer = text_writer
+        self.planner = planner
         self.logins = logins
         self.confirm = confirm
         self.handoff = handoff
@@ -181,6 +184,7 @@ class Agent:
         self.last_result: RunResult | None = None
         self.last_observation: Observation | None = None
         self._sensitive: list[str] = []  # saved-login usernames on screen: masked in events, memory and logs
+        self.last_plan: list[str] = []
 
     @classmethod
     def from_settings(
@@ -215,6 +219,7 @@ class Agent:
         writer, status = create_writer(settings, notify=notify)
         log.info("text writer: %s", status.describe())
         logins = LoginStore(settings.logins.index_path) if settings.logins.enabled else None
+        planner = Planner(writer) if writer is not None and settings.agent.plan == "auto" else None
         return cls(
             observer=observer,
             executor=executor,
@@ -222,6 +227,7 @@ class Agent:
             settings=settings,
             memory=memory,
             text_writer=writer,
+            planner=planner,
             logins=logins,
             confirm=confirm,
             handoff=handoff,
@@ -270,6 +276,11 @@ class Agent:
             return event
 
         try:
+            plan = self.planner.plan(goal) if self.planner is not None else []
+            self.last_plan = plan
+            if plan:
+                listing = " · ".join(f"{i}. {step}" for i, step in enumerate(plan, start=1))
+                yield emit(StepEvent(step=0, status="plan", action="PLAN", message=listing))
             if app:
                 result = self._open_requested_app(app)
                 history.append({"step": 0, "action": f"OPEN_APP {app} (requested)", "result": result.detail or "ok"})
@@ -324,6 +335,7 @@ class Agent:
                     text_source=text_source,
                     history=history[-cfg.history_size :],
                     hints=[h.to_state() for h in hints],
+                    plan=plan,
                 )
                 t3 = self.clock()
                 event = StepEvent(

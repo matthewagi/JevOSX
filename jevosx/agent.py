@@ -400,7 +400,7 @@ class Agent:
                         break
                     continue
 
-                verdict = self.safety.check(action, obs.app)
+                verdict = self.safety.check(action, obs.app, window_title=obs.window.title if obs.window else None)
                 if verdict.verdict == "deny" or (
                     verdict.verdict == "confirm" and not (self.confirm and self.confirm(action, verdict.reason))
                 ):

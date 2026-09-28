@@ -4,6 +4,7 @@ running and installed apps. Produces an `Observation`; never takes a screenshot 
 from __future__ import annotations
 
 import contextlib
+import os
 import time
 from typing import Any
 
@@ -11,7 +12,7 @@ from ..config import ObserverSettings
 from ..errors import StaleElementError
 from ..types import AppInfo, Observation, UIElement, WindowInfo, clean_text
 from . import apps as appmod
-from .ax import AXNode, require_ax
+from .ax import AX_SUCCESS, AXNode, require_ax
 from .menus import walk_menu_bar
 from .walker import TreeWalker, WalkLimits
 
@@ -54,13 +55,25 @@ class MacDesktopObserver:
 
     # ---- public API ---------------------------------------------------------------------------------------------
     def frontmost_pid(self) -> int | None:
-        app = self._system.get("AXFocusedApplication")
-        if app is None:
-            return None
-        try:
-            return app.pid()
-        except StaleElementError:
-            return None
+        return self.detect_frontmost()[0]
+
+    def detect_frontmost(self) -> tuple[int | None, str]:
+        """(pid, how it was found). Accessibility first; the window list and NSWorkspace are fallbacks because the
+        system-wide AXFocusedApplication query can fail (e.g. while the focused app is busy)."""
+        err, app = self._system.read("AXFocusedApplication")
+        if err == AX_SUCCESS and isinstance(app, AXNode):
+            try:
+                return app.pid(), "accessibility"
+            except StaleElementError:
+                pass
+        why = f"accessibility error {err}" if err != AX_SUCCESS else "accessibility returned no app"
+        pid = appmod.frontmost_from_window_list(exclude=frozenset({os.getpid()}))
+        if pid:
+            return pid, f"window list ({why})"
+        pid = appmod.frontmost_from_workspace()
+        if pid:
+            return pid, f"NSWorkspace ({why})"
+        return None, f"{why}; the window list and NSWorkspace found no app either"
 
     def app_node(self, pid: int) -> AXNode:
         node = self._app_nodes.get(pid)
@@ -99,9 +112,9 @@ class MacDesktopObserver:
 
     def observe(self) -> Observation:
         started = time.perf_counter()
-        pid = self.frontmost_pid()
+        pid, how = self.detect_frontmost()
         if pid is None:
-            raise StaleElementError("no frontmost application")
+            raise StaleElementError(f"no frontmost application ({how})")
         app = appmod.app_for_pid(pid)
         node = self.app_node(pid)
         self._enable_web_accessibility(pid, app, node)

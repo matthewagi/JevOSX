@@ -174,3 +174,26 @@ def test_slots_from_goal_and_text_resolution():
     assert source.resolve("password", goal="g", element=field, obs=obs, history=[]) == ("s3cret", True, "slot:password")
     with pytest.raises(TextUnavailableError):
         TextSource({}).resolve(GENERATE, goal="g", element=field, obs=obs, history=[])
+
+
+def test_console_window_only_offers_new_window_or_app_switch():
+    obs = observation(
+        [element(1, "AXTextField", "Search or enter website name", kind="text_input", ops=("TYPE_TEXT", "CLICK"))],
+        app=AppInfo("Safari", "com.apple.Safari", pid=5),
+        window="JevOSX Console",
+        text="12:24 run search the web for pictures of red flowers",
+        menu_items=[
+            UIElement(1, "AXMenuItem", None, "File › New Window", kind="menu_item", ops=("MENU",), shortcut="⌘N"),
+            UIElement(2, "AXMenuItem", None, "File › Close Window", kind="menu_item", ops=("MENU",), shortcut="⌘W"),
+        ],
+        running=[AppInfo("Safari", "com.apple.Safari", pid=5), AppInfo("TextEdit", "com.apple.TextEdit", pid=6)],
+    )
+    r = router()
+    text = TextSource({"q": "red flowers"})
+    space = r.space(obs, text, "search the web for pictures of red flowers")
+    assert "CLICK" not in space.operations and "TYPE_TEXT" not in space.operations
+    assert set(space.targets_for("PRESS_KEY")) == {"CMD_N", "CMD_T"}
+    assert [t.element.label for t in space.targets_for("MENU").values()] == ["File › New Window"]
+    state, questions = r.build_request("search the web", obs, space, text_source=text)
+    assert state["elements"] == [] and state["visible_text"] == "" and "never act inside it" in state["desktop"]["note"]
+    assert "click_target" not in questions and "type_text_target" not in questions

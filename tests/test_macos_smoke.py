@@ -47,6 +47,10 @@ def test_pyobjc_symbols_resolve():
         "CGEventCreateMouseEvent",
         "kCGHIDEventTap",
         "kCGEventSourceStateHIDSystemState",
+        "CGWindowListCopyWindowInfo",
+        "kCGWindowListOptionOnScreenOnly",
+        "kCGWindowListExcludeDesktopElements",
+        "kCGNullWindowID",
     ):
         assert hasattr(Q, name), name
 
@@ -67,3 +71,13 @@ def test_installed_apps_scan_finds_system_apps():
 
     apps = scan_installed_apps(["/System/Applications"])
     assert any(a.bundle_id == "com.apple.TextEdit" for a in apps)
+
+
+def test_frontmost_fallbacks_run_without_errors():
+    from jevosx.observer.apps import frontmost_from_window_list, frontmost_from_workspace
+    from jevosx.observer.ax import AXNode
+
+    err, _value = AXNode.system_wide().read("AXFocusedApplication")
+    assert isinstance(err, int)
+    for pid in (frontmost_from_window_list(), frontmost_from_workspace()):
+        assert pid is None or pid > 0

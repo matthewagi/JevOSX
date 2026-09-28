@@ -236,3 +236,23 @@ def test_safety_denies_password_typing_without_secret_slot(tmp_path):
     assert policy.check(Action("TYPE_TEXT", element=field, text="x", text_is_secret=True), frontmost).allowed
     keychain = AppInfo("Keychain Access", "com.apple.keychainaccess")
     assert policy.check(Action("OPEN_APP", app=keychain), frontmost).verdict == "deny"
+
+
+def test_safety_never_acts_inside_the_console_window():
+    from jevosx.executor.keys import key_vocabulary
+    from jevosx.executor.safety import SafetyPolicy
+    from jevosx.types import Action, UIElement
+
+    policy = SafetyPolicy()
+    safari = AppInfo("Safari", "com.apple.Safari", pid=1)
+    keys = key_vocabulary()
+    title = "JevOSX Console"
+    field = element(1, "AXTextField", "Search or enter website name", ops=("TYPE_TEXT",))
+    assert policy.check(Action("TYPE_TEXT", element=field, text="x"), safari, window_title=title).verdict == "deny"
+    assert policy.check(Action("PRESS_KEY", key=keys["CMD_L"]), safari, window_title=title).verdict == "deny"
+    assert policy.check(Action("PRESS_KEY", key=keys["CMD_N"]), safari, window_title=title).allowed
+    close = UIElement(2, "AXMenuItem", None, "File › Close Window", kind="menu_item", ops=("MENU",))
+    new = UIElement(1, "AXMenuItem", None, "File › New Window", kind="menu_item", ops=("MENU",))
+    assert policy.check(Action("MENU", element=close), safari, window_title=title).verdict == "deny"
+    assert policy.check(Action("MENU", element=new), safari, window_title=title).allowed
+    assert policy.check(Action("TYPE_TEXT", element=field, text="x"), safari, window_title="Apple").allowed

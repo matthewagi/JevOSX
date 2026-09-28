@@ -14,13 +14,17 @@ from typing import Any
 
 from ..errors import RouterContractError
 from ..executor.keys import KeyBinding
-from ..types import CLICK, TYPE_TEXT, Observation
+from ..types import CLICK, TYPE_TEXT, Observation, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
 from .prompts import MEMORY, NEXT_ACTION, TARGET, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
 from .text import TextSource
 
 TEXT_SLOT_HEAD = "text_slot"
+CONSOLE_NOTE = (
+    "The focused window is the JevOSX console that sends you commands; never act inside it. For web tasks open a "
+    "new browser window (PRESS_KEY CMD_N or the New Window menu command); otherwise OPEN_APP the app the goal needs."
+)
 ELEMENT_HEADS = frozenset({HEADS[CLICK], HEADS[TYPE_TEXT]})
 
 
@@ -227,10 +231,13 @@ def build_state(
         desktop["other_windows"] = others
     if obs.stats.get("truncated"):
         desktop["note"] = "element list truncated; scroll or use menu commands to reach more"
+    console = obs.window is not None and is_console_window(obs.window.title)
+    if console:
+        desktop["note"] = CONSOLE_NOTE
     state: dict[str, Any] = {
         "desktop": desktop,
-        "elements": [element_state(e) for e in obs.elements if e.ops or include_disabled],
-        "visible_text": obs.text,
+        "elements": [] if console else [element_state(e) for e in obs.elements if e.ops or include_disabled],
+        "visible_text": "" if console else obs.text,
         "recent_actions": list(history),
     }
     if hints:

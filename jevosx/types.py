@@ -248,6 +248,16 @@ DONE = "DONE"
 BLOCKED = "BLOCKED"
 TERMINAL_OPERATIONS = frozenset({DONE, BLOCKED})
 
+# The web console (`jevosx ui`) is itself a browser window. The agent must never act inside it: it may only
+# open a new browser window/tab or switch apps from there.
+CONSOLE_WINDOW_TITLE = "JevOSX Console"
+CONSOLE_SAFE_KEYS = frozenset({"CMD_N", "CMD_T"})
+CONSOLE_SAFE_MENU = re.compile(r"\bnew (window|tab|private window)\b", re.IGNORECASE)
+
+
+def is_console_window(title: str | None) -> bool:
+    return bool(title) and CONSOLE_WINDOW_TITLE.lower() in str(title).lower()
+
 
 @dataclass(slots=True)
 class Action:

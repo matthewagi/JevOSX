@@ -5,6 +5,7 @@ from __future__ import annotations
 import plistlib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from ..types import AppInfo
 
@@ -55,6 +56,42 @@ def app_for_pid(pid: int) -> AppInfo:  # pragma: no cover - macOS only
                 path=str(url.path()) if url is not None else None,
             )
     return AppInfo(name=f"pid {pid}", pid=pid)
+
+
+def pick_frontmost(windows: Iterable[Any], exclude: set[int] | frozenset[int] = frozenset()) -> int | None:
+    """Owner pid of the frontmost normal window in a CGWindowList (front-to-back order). Pure, so it is testable."""
+    for window in windows:
+        pid = window.get("kCGWindowOwnerPID")
+        bounds = window.get("kCGWindowBounds") or {}
+        if (
+            window.get("kCGWindowLayer", 0) != 0
+            or not pid
+            or int(pid) in exclude
+            or window.get("kCGWindowAlpha", 1) == 0
+            or window.get("kCGWindowOwnerName") in ("Window Server", "Dock")
+            or (bounds and (bounds.get("Width", 0) < 50 or bounds.get("Height", 0) < 50))
+        ):
+            continue
+        return int(pid)
+    return None
+
+
+def frontmost_from_window_list(exclude: set[int] | frozenset[int] = frozenset()) -> int | None:  # pragma: no cover
+    """Fallback that needs neither Accessibility nor Screen Recording (owner pids are always visible)."""
+    try:
+        import Quartz
+    except ImportError:
+        return None
+    options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+    return pick_frontmost(Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or [], exclude)
+
+
+def frontmost_from_workspace() -> int | None:  # pragma: no cover - macOS only
+    if not APPKIT_AVAILABLE:
+        return None
+    pump_run_loop()
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return int(app.processIdentifier()) if app is not None else None
 
 
 def read_bundle(path: Path) -> AppInfo | None:

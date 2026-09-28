@@ -4,7 +4,7 @@ import pytest
 
 from jevosx.executor.input import utf16_chunks
 from jevosx.executor.keys import KeyChord, key_vocabulary
-from jevosx.observer.apps import find_app, merge_apps, scan_installed_apps
+from jevosx.observer.apps import find_app, merge_apps, pick_frontmost, scan_installed_apps
 from jevosx.observer.menus import shortcut_text, walk_menu_bar
 from jevosx.types import AppInfo
 from tests.fakes import FakeNode
@@ -93,3 +93,17 @@ def test_installed_app_scan_and_lookup(tmp_path):
     assert find_app("com.apple.notes", apps).name == "Notes"
     assert find_app("saf", apps).pid == 7
     assert find_app("nothing", apps) is None
+
+
+def test_pick_frontmost_from_window_list():
+    windows = [
+        {"kCGWindowLayer": 25, "kCGWindowOwnerPID": 90, "kCGWindowOwnerName": "Control Center"},  # menu extra
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 77, "kCGWindowOwnerName": "Python"},  # ourselves
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 55, "kCGWindowAlpha": 0},  # invisible
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 44, "kCGWindowBounds": {"Width": 10, "Height": 10}},  # sliver
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 12, "kCGWindowOwnerName": "Safari",
+         "kCGWindowBounds": {"X": 0, "Y": 25, "Width": 1200, "Height": 800}},
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 13, "kCGWindowOwnerName": "Terminal"},
+    ]  # fmt: skip
+    assert pick_frontmost(windows, exclude={77}) == 12
+    assert pick_frontmost([], exclude=set()) is None

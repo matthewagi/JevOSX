@@ -94,6 +94,11 @@ class AXNode:
             raise AccessibilityPermissionError("Accessibility API is disabled for this process")
         return default
 
+    def read(self, attribute: str) -> tuple[int, Any]:
+        """Like get(), but returns (AXError code, value) instead of raising, for diagnostics."""
+        err, value = _AS.AXUIElementCopyAttributeValue(self.ref, attribute, None)
+        return int(err), (_convert(value) if err == AX_SUCCESS else None)
+
     def get_many(self, attributes: Sequence[str]) -> dict[str, Any]:
         """Batch read. Missing/unsupported attributes map to None."""
         err, values = _AS.AXUIElementCopyMultipleAttributeValues(self.ref, list(attributes), 0, None)

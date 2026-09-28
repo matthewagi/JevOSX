@@ -249,12 +249,20 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
         from .observer.ax import AX_AVAILABLE, is_trusted
 
         check(AX_AVAILABLE, "pyobjc Accessibility bindings", "pip install -r requirements.txt")
+        trusted = AX_AVAILABLE and is_trusted(prompt=True)
         if AX_AVAILABLE:
             check(
-                is_trusted(prompt=True),
+                trusted,
                 "Accessibility permission",
                 "System Settings › Privacy & Security › Accessibility → enable your terminal/IDE, then restart it",
             )
+        if trusted:
+            from .observer import create_observer
+            from .observer.apps import app_for_pid
+
+            pid, how = create_observer(settings.observer).detect_frontmost()
+            name = app_for_pid(pid).name if pid else "none"
+            check(pid is not None, f"frontmost app detected: {name} (via {how})", "report this line to the developers")
     except JevOSXError as exc:
         check(False, "Accessibility bindings", str(exc))
     from .executor.input import QUARTZ_AVAILABLE

@@ -7,7 +7,17 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ..config import SafetySettings
-from ..types import MENU, OPEN_APP, PRESS_KEY, TYPE_TEXT, Action, AppInfo
+from ..types import (
+    CONSOLE_SAFE_KEYS,
+    CONSOLE_SAFE_MENU,
+    MENU,
+    OPEN_APP,
+    PRESS_KEY,
+    TYPE_TEXT,
+    Action,
+    AppInfo,
+    is_console_window,
+)
 
 Verdict = Literal["allow", "confirm", "deny"]
 
@@ -30,7 +40,14 @@ class SafetyPolicy:
         self._confirm_keys = {k.upper() for k in self.settings.confirm_keys}
         self._deny_keys = {k.upper() for k in self.settings.deny_keys}
 
-    def check(self, action: Action, frontmost: AppInfo) -> SafetyVerdict:
+    def check(self, action: Action, frontmost: AppInfo, *, window_title: str | None = None) -> SafetyVerdict:
+        if is_console_window(window_title) and action.operation != OPEN_APP:
+            if action.element is not None and action.element.kind != "menu_item":
+                return SafetyVerdict("deny", "never acts inside the JevOSX console window")
+            if action.operation == PRESS_KEY and (action.key is None or action.key.id not in CONSOLE_SAFE_KEYS):
+                return SafetyVerdict("deny", "only new-window/tab shortcuts are allowed in the JevOSX console window")
+            if action.operation == MENU and not (action.element and CONSOLE_SAFE_MENU.search(action.element.label)):
+                return SafetyVerdict("deny", "only New Window/Tab menu commands are allowed in the JevOSX console")
         target_app = action.app if action.operation == OPEN_APP else frontmost
         if target_app is not None and self._denied_app(target_app):
             return SafetyVerdict("deny", f"{target_app.name} is on the deny list")

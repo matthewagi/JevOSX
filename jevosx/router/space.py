@@ -15,6 +15,8 @@ from ..executor.keys import KeyBinding
 from ..types import (
     BLOCKED,
     CLICK,
+    CONSOLE_SAFE_KEYS,
+    CONSOLE_SAFE_MENU,
     DONE,
     FOCUS_WINDOW,
     MENU,
@@ -28,6 +30,7 @@ from ..types import (
     Observation,
     UIElement,
     WindowInfo,
+    is_console_window,
     normalize_key,
 )
 
@@ -135,21 +138,25 @@ class ActionSpace:
             if len(bucket) < max_choices:
                 bucket[target.id] = target
 
+        # In the JevOSX console window only "new window/tab" and app switching are offered (see types.py).
+        console = obs.window is not None and is_console_window(obs.window.title)
         # Focused element first so truncation never drops it.
-        ordered = sorted(obs.elements, key=lambda e: not e.focused)
+        ordered = [] if console else sorted(obs.elements, key=lambda e: not e.focused)
         for element in ordered:
             if CLICK in element.ops:
                 add(HEADS[CLICK], _element_target(str(element.index), element))
             if TYPE_TEXT in element.ops and text_available:
                 add(HEADS[TYPE_TEXT], _element_target(str(element.index), element))
         for item in obs.menu_items:
+            if console and not CONSOLE_SAFE_MENU.search(item.label):
+                continue
             criterion: dict[str, Any] = {"command": item.label}
             if item.shortcut:
                 criterion["shortcut"] = item.shortcut
             if item.checked:
                 criterion["checked"] = True
             add(HEADS[MENU], Target(f"m{item.index}", criterion, "menu:" + normalize_key(item.label), element=item))
-        for area in obs.scroll_areas:
+        for area in [] if console else obs.scroll_areas:
             criterion = {"area": area.label}
             if area.container:
                 criterion["in"] = area.container
@@ -158,6 +165,8 @@ class ActionSpace:
                 Target(f"s{area.index}", criterion, "scroll:" + normalize_key(area.label), element=area),
             )
         for binding in keys.values():
+            if console and binding.id not in CONSOLE_SAFE_KEYS:
+                continue
             add(
                 HEADS[PRESS_KEY],
                 Target(

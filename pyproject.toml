@@ -37,6 +37,6 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: dependency stubs (e.g. numpy >= 2.5 on 3.12) must be parsed for the running interpreter.
 ignore_missing_imports = true
 warn_unused_ignores = true

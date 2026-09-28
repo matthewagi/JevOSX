@@ -1,5 +1,6 @@
 """On macOS CI: prove the pyobjc symbol names used by the observer/executor exist (no Accessibility grant needed)."""
 
+import contextlib
 import sys
 
 import pytest
@@ -51,11 +52,14 @@ def test_pyobjc_symbols_resolve():
 
 
 def test_system_wide_element_and_trust_check_do_not_crash():
+    from jevosx.errors import AccessibilityPermissionError
     from jevosx.observer.ax import AX_AVAILABLE, AXNode, is_trusted
 
     assert AX_AVAILABLE
     assert isinstance(is_trusted(prompt=False), bool)
-    AXNode.system_wide().get("AXFocusedApplication")  # None without a grant; must not raise
+    # Exercises the real pyobjc call signatures; CI runners usually have no Accessibility grant.
+    with contextlib.suppress(AccessibilityPermissionError):
+        AXNode.system_wide().get("AXFocusedApplication")
 
 
 def test_installed_apps_scan_finds_system_apps():

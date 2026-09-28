@@ -108,7 +108,7 @@ jevosx/
 └── cli.py               # `jevosx run | observe | ui | doctor | memory`
 examples/                # run_agent.py (Python API), dump_tree.py (inspect what the agent sees)
 config/                  # jevosx.example.toml: every setting with its default
-scripts/bootstrap.sh     # venv + install + doctor
+scripts/                 # install.sh (one-line installer), bootstrap.sh (venv + install + doctor)
 tests/                   # offline tests: fake AX trees, fake desktop, mocked Jev endpoint
 ```
 
@@ -209,6 +209,25 @@ window, top options, confidence, floor and resolution. You can also pass your ow
 ## Setup
 
 **Requirements:** macOS (13 Ventura or newer recommended), Python 3.11+, and a TypeSafe API key.
+
+**One-line install.** Open Terminal and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/matthewagi/JevOSX/main/scripts/install.sh | bash
+```
+
+What the installer does, without needing `sudo`:
+1. Finds Python 3.11+ (or gets Python 3.12 through [uv](https://docs.astral.sh/uv/) if you don't have it).
+2. Downloads JevOSX to `~/JevOSX` and installs its dependencies.
+3. Asks for your TypeSafe key (hidden input, stored in `~/JevOSX/.env` with `chmod 600`).
+4. Opens the Accessibility settings pane.
+5. Adds a `jevosx` command and an optional double-clickable `JevOSX.command` on your Desktop.
+6. Offers to start the console.
+
+Run it again to update. Overrides: `JEVOSX_DIR`, `JEVOSX_REF`, `JEVOSX_PYTHON`, and `JEVOSX_YES=1` to accept
+the defaults without questions.
+
+Or step by step:
 
 ```bash
 git clone https://github.com/matthewagi/JevOSX.git && cd JevOSX

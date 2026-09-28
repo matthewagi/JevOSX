@@ -56,6 +56,7 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
         ),
         ("Open Downloads in Finder", lambda d: d.apps["Finder"].folder == "Downloads"),
         ("Open Notes", lambda d: d.front == "Notes"),
+        ("look for pictures of flowers red", lambda d: d.apps["Safari"].page == "pictures of flowers red - Search"),
     ],
 )
 def test_demo_scenarios_complete(goal, check):

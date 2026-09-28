@@ -345,7 +345,7 @@ class Agent:
                         if resolution == "stop":
                             event.status = "low_confidence"
                             yield emit(event)
-                            status, message = "low_confidence", str(exc)
+                            status, message = "low_confidence", str(exc) + _typing_tip(text_source)
                             break
                         if resolution == "retry":
                             low_confidence += 1
@@ -354,6 +354,7 @@ class Agent:
                             if low_confidence > cfg.max_low_confidence_retries:
                                 status = "low_confidence"
                                 message = f"Jev stayed below the {self.gate.floor:.2f} confidence floor"
+                                message += _typing_tip(text_source)
                                 break
                             self.sleep(self.settings.executor.wait_s)
                             continue
@@ -624,6 +625,12 @@ class Agent:
             f" · conf {confidence:.2f}" if confidence is not None else "",
             f" · {timings}" if timings else "",
         )
+
+
+def _typing_tip(text_source: TextSource) -> str:
+    if text_source.available:
+        return ""
+    return '. Nothing was available to type: put the text in quotes, e.g. search for "red flowers"'
 
 
 def _history_action(action: Action) -> str:

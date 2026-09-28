@@ -21,6 +21,7 @@ import httpx
 
 from ..errors import StaleElementError
 from ..router.client import JevClient
+from ..router.text import slots_from_goal
 from ..types import (
     CLICK,
     MENU,
@@ -557,7 +558,9 @@ def _infer_app(lowered: str, explicit: str | None) -> str | None:
         return "TextEdit"
     if re.search(r"\bnotes?\b", lowered):
         return "Notes"
-    if re.search(r"\b(search|website|browse|visit)\b|\.com\b", lowered):
+    if re.search(
+        r"\b(search|website|browse|visit|look (?:for|up)|google|web|online|pictures?|images?)\b|\.com\b", lowered
+    ):
         return "Safari"
     if re.search(r"\b(folder|downloads|documents|desktop|applications)\b", lowered):
         return "Finder"
@@ -576,7 +579,7 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     elements = state.get("elements", [])
     history = state.get("recent_actions", [])
     effective = [h["action"] for h in history if str(h.get("result", "")).startswith(("ok", "ui changed"))]
-    quotes = [a or b for a, b in _QUOTE.findall(goal)]
+    quotes = list(slots_from_goal(goal).values())  # the same typeable text the real agent offers
     seen = " ".join([window, state.get("visible_text", ""), *(str(e.get("value", "")) for e in elements)]).lower()
     selected = {e["label"].lower() for e in elements if "selected" in e.get("state", [])}
 
@@ -599,9 +602,9 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     mentioned = next((n for n in DEMO_APP_NAMES if re.search(rf"\b{n.lower()}\b", lowered)), None)
     wanted = _infer_app(lowered, mentioned)
     wants_save = bool(re.search(r"\bsave\b", lowered))
-    wants_submit = bool(re.search(r"\b(search|go to|visit|look up|browse)\b", lowered))
+    wants_submit = bool(re.search(r"\b(search|go to|visit|look (?:up|for)|google|browse)\b", lowered))
     wants_delete = bool(re.search(r"\b(delete|remove|trash)\b", lowered))
-    typing = bool(re.search(r"\b(type|write|enter|search|fill|put|say|add|go to|visit)\b", lowered))
+    typing = bool(re.search(r"\b(type|write|enter|search|look|google|fill|put|say|add|go to|visit)\b", lowered))
     file_name = quotes[-1] if wants_save and len(quotes) > 1 else None
     body_quotes = [q for q in quotes if q != file_name] if typing else []
     pending = [q for q in body_quotes if q.lower() not in seen]

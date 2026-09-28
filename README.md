@@ -378,7 +378,11 @@ and wrong types are rejected when the config loads.
 A `.env` file in the working directory is loaded automatically. Real environment variables always win.
 
 **Where `TYPE_TEXT` values come from.** Jev chooses; it never writes text. Values come from:
-1. quoted literals in the goal (`"…"`, `“…”`, `` `…` ``), which become slots `quote_1`, `quote_2`, …;
+1. the goal itself:
+   - quoted literals (`"…"`, `“…”`, `` `…` ``) become slots `quote_1`, …;
+   - the phrase after *search for / look for / look up / google / type / enter / say* becomes `phrase_1`, …
+     ("look for pictures of red flowers in Safari" → `pictures of red flowers`);
+   - URLs and domains become `url_1`, …;
 2. `--slot NAME=TEXT` / `text_slots={...}`. With several slots, Jev picks the right one in the same request;
 3. optionally, a small OpenAI-compatible model (`[text_model]`, off by default), offered as `GENERATE`.
 

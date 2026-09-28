@@ -197,3 +197,22 @@ def test_console_window_only_offers_new_window_or_app_switch():
     state, questions = r.build_request("search the web", obs, space, text_source=text)
     assert state["elements"] == [] and state["visible_text"] == "" and "never act inside it" in state["desktop"]["note"]
     assert "click_target" not in questions and "type_text_target" not in questions
+
+
+@pytest.mark.parametrize(
+    ("goal", "slots"),
+    [
+        ("look for pictures of flowers red", {"phrase_1": "pictures of flowers red"}),
+        ("search the web for pictures of red flowers", {"phrase_1": "pictures of red flowers"}),
+        ("Search for red flowers in Safari", {"phrase_1": "red flowers"}),
+        ('In Safari, search for "accessibility API"', {"quote_1": "accessibility API"}),
+        ("Open TextEdit, create a new document and type hello world", {"phrase_1": "hello world"}),
+        ("go to apple.com and look up the store hours", {"phrase_1": "the store hours", "url_1": "apple.com"}),
+        ("google best pizza near me, then open the first result", {"phrase_1": "best pizza near me"}),
+        ("Open Notes", {}),
+        ("Open Downloads in Finder", {}),
+        ("Delete the Trip ideas note in Notes", {}),
+    ],
+)
+def test_goal_phrases_become_choosable_text(goal, slots):
+    assert slots_from_goal(goal) == slots

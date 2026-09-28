@@ -23,10 +23,46 @@ SECRET_NAME = re.compile(r"secret|password|passcode|passwd|token|\bpin\b|otp", r
 _QUOTED = re.compile(r'"([^"\n]{1,500})"|“([^”\n]{1,500})”|`([^`\n]{1,500})`')
 
 
+# Unquoted phrases that are clearly meant to be typed: "search the web for red flowers", "look up the weather",
+# "type hello". Anything after these verbs, minus a trailing "in Safari"/"on Google"-style clause, becomes a slot.
+_PHRASE = re.compile(
+    r"\b(?:search(?:\s+(?:the\s+web|the\s+internet|online|google|the\s+browser))?(?:\s+for)?|look\s+(?:up|for)"
+    r"|google|type|enter|say)\s+(?P<text>.+)",
+    re.IGNORECASE,
+)
+_TRAILING_CLAUSE = re.compile(
+    r"\s+(?:in|on|using|with|into|from|via)\s+(?:a\s+new\s+(?:window|tab)|the\s+(?:browser|web|internet)|google"
+    r"|safari|chrome|google\s+chrome|firefox|arc|edge|brave|textedit|notes|finder|(?:the\s+)?search\s+(?:bar|field|box))"
+    r"\b.*$",
+    re.IGNORECASE,
+)
+_URL = re.compile(r"\b(?:https?://)?(?:[a-z0-9-]+\.)+(?:com|org|net|io|ai|dev|app|co|edu|gov|uk|de|fr)(?:/[^\s\"]*)?",
+                  re.IGNORECASE)  # fmt: skip
+
+
 def slots_from_goal(goal: str) -> dict[str, str]:
-    """Quoted literals in the goal become slots: 'type "hello world" into Notes' → {"quote_1": "hello world"}."""
-    values = [next(g for g in match.groups() if g is not None) for match in _QUOTED.finditer(goal)]
-    return {f"quote_{i}": value for i, value in enumerate(dict.fromkeys(values), start=1)}
+    """Text the goal clearly asks to type, offered to Jev as choosable slots (Jev never writes text itself).
+
+    - quoted literals: 'type "hello world" into Notes' → {"quote_1": "hello world"}
+    - the phrase after search/look up/look for/google/type/enter/say: "look for pictures of red flowers in Safari"
+      → {"phrase_1": "pictures of red flowers"}
+    - URLs and domains: "go to apple.com" → {"url_1": "apple.com"}
+    """
+    quoted = [next(g for g in match.groups() if g is not None) for match in _QUOTED.finditer(goal)]
+    slots = {f"quote_{i}": value for i, value in enumerate(dict.fromkeys(quoted), start=1)}
+    unquoted = _QUOTED.sub(" ", goal)
+    phrases: list[str] = []
+    for match in _PHRASE.finditer(unquoted):
+        text = re.split(r"(?:^|\s+)(?:and|then)(?:\s+|$)|[,;]", match.group("text").strip(), maxsplit=1)[0]
+        text = _TRAILING_CLAUSE.sub("", text).strip(" .!?:\"'")
+        if 1 <= len(text) <= 200 and not _URL.fullmatch(text):
+            phrases.append(text)
+    for i, value in enumerate(dict.fromkeys(p for p in phrases if p not in quoted), start=1):
+        slots[f"phrase_{i}"] = value
+    urls = [m.group(0).rstrip(".,") for m in _URL.finditer(unquoted)]
+    for i, value in enumerate(dict.fromkeys(urls), start=1):
+        slots[f"url_{i}"] = value
+    return slots
 
 
 @dataclass(frozen=True, slots=True)

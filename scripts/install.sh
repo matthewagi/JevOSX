@@ -144,13 +144,19 @@ fi
 
 # ---- 5. Accessibility ----------------------------------------------------------------------------------------------
 step "Accessibility permission"
+case "${TERM_PROGRAM:-}" in
+  Apple_Terminal | "") HOST_APP="Terminal" ;;
+  iTerm.app) HOST_APP="iTerm" ;;
+  vscode) HOST_APP="Visual Studio Code" ;;
+  *) HOST_APP="$TERM_PROGRAM" ;;
+esac
 if [ "$(uname -s)" = "Darwin" ]; then
   if .venv/bin/python -c 'from jevosx.observer.ax import is_trusted; import sys; sys.exit(0 if is_trusted(prompt=True) else 1)'; then
-    ok "already granted to $(basename "${TERM_PROGRAM:-your terminal}")"
+    ok "already granted to $HOST_APP"
   else
     warn "macOS needs your OK before JevOSX can read and control apps."
     echo "    In the window that opens: System Settings › Privacy & Security › Accessibility →"
-    echo "    turn ON the app you are using right now (${TERM_PROGRAM:-Terminal}). Then quit and reopen it."
+    echo "    turn ON $HOST_APP (click + and add it if it is not listed). Then quit it with ⌘Q and reopen it."
     open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
   fi
 else

@@ -1,6 +1,7 @@
-"""JevOSX: a coordinate-free, OCR-free macOS automation agent.
+"""JevOSX: a coordinate-free macOS automation agent.
 
-Accessibility trees in → TypeSafe Jev typed decisions → deterministic AX actions → local trajectory memory.
+Accessibility trees (with on-device OCR as a fallback) in → TypeSafe Jev typed decisions → deterministic actions →
+local trajectory memory.
 """
 
 from .agent import Agent, RunResult, StepEvent

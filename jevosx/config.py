@@ -73,6 +73,11 @@ class ObserverSettings:
     )
     messaging_timeout_s: float = 0.5
     enable_web_accessibility: bool = True
+    # Apps that draw their own interface: OCR the focused window when Accessibility sees almost nothing there.
+    vision: str = "auto"  # auto | always | off (needs the Screen Recording permission)
+    vision_min_controls: int = 4  # auto: fewer interactive elements than this (and hardly any text) → OCR
+    vision_max_items: int = 60
+    vision_min_confidence: float = 0.35
 
 
 @dataclass
@@ -257,6 +262,7 @@ class Settings:
             "executor.typing_mode": (self.executor.typing_mode, ("auto", "ax", "keys")),
             "writer.backend": (self.writer.backend, ("auto", "apple", "openai", "off")),
             "writer.offer": (self.writer.offer, ("auto", "always")),
+            "observer.vision": (self.observer.vision, ("auto", "always", "off")),
         }
         for name, (value, allowed) in choices.items():
             if value not in allowed:

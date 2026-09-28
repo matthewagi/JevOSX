@@ -1,17 +1,26 @@
 # JevOSX
 
-**A coordinate-free, OCR-free macOS automation agent.** JevOSX reads the native Accessibility tree
+**A coordinate-free macOS automation agent.** JevOSX reads the native Accessibility tree
 (`AXUIElement`) of whatever is on screen, turns it into a compact indexed text map, and asks
 [TypeSafe's Jev](https://docs.typesafe.ai/introduction), a "System One" decision model, to choose the next
 operation and its target from a fixed menu of options. It then runs that choice deterministically through
 Accessibility actions and keyboard events. Every run is saved to a local SQLite memory. Similar past runs
 come back as hints, so repeated tasks get better over time.
 
-There are no screenshots, no pixel guessing and no vision model. The model never outputs coordinates, selectors,
-shell commands or free text. It only picks ids that the agent observed on this Mac.
+The model never outputs coordinates, selectors, shell commands or free text. It only picks ids that the agent
+observed on this Mac. The Accessibility tree comes first. Only for apps that draw their own interface (games, canvas
+design tools) does JevOSX capture that one window and read its text with Apple's on-device OCR, and even then Jev
+picks recognized text by id while the click point is computed locally.
+
+It can also:
+- write new text on the Mac (Apple's on-device model), for example "write a poem about autumn in TextEdit";
+- sign in to websites with logins kept in the macOS Keychain;
+- hand a step to you (a 2FA code, a CAPTCHA) and carry on afterwards.
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the research behind these and what comes next.
 
 Inspired by [jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (browser) and typesafe-computer-use
-(OCR-based desktop). JevOSX brings their typed-choice loop to the whole Mac using accessibility data instead of OCR.
+(OCR-based desktop). JevOSX brings their typed-choice loop to the whole Mac, with accessibility data first and OCR as the fallback.
 
 ---
 
@@ -81,6 +90,7 @@ jevosx/
 │   ├── menus.py         #   menu-bar walker → MENU targets with paths and shortcuts
 │   ├── apps.py          #   running apps (NSWorkspace) + installed app bundles (Info.plist)
 │   ├── desktop.py       #   MacDesktopObserver: frontmost app/window, web accessibility, caching
+│   ├── vision.py        #   OCR fallback for apps that draw their own interface (window capture + Vision)
 │   └── textmap.py       #   human-readable text map (`jevosx observe`)
 ├── router/              # Jev router
 │   ├── client.py        #   HTTP/2 Jev client, retries, strict choice-only contract, answer validation
@@ -163,10 +173,10 @@ Jev answers each question with `{choice, probabilities (one per id), confidence}
 | Sent to TypeSafe | Stays local |
 | --- | --- |
 | Goal, instructions | AX handles, element frames/coordinates |
-| Roles, labels, non-secret values, states of interactive elements | Screenshots (none are ever taken) |
+| Roles, labels, non-secret values, states of interactive elements | Window captures for OCR (read on the Mac, then deleted) |
 | Visible static text (capped, 2,000 chars by default) | Password-field values (never read) |
-| Menu command paths, app and window names | Secret text-slot values (sent as `••••••`) |
-| Recent action descriptions, memory hints | The memory database, fallback log and traces |
+| Menu command paths, app and window names, page address (no query string) | Secret text-slot values and saved passwords (sent as `••••••`) |
+| Recent action descriptions, memory hints, text recognized on screen (OCR) | The memory database, fallback log and traces; everything the on-device writer sees |
 
 ## Guarantees and guardrails
 
@@ -264,7 +274,10 @@ export TYPESAFE_API_KEY=...
 **Accessibility permission (required).** macOS only lets trusted processes read other apps' UI and send input.
 The first `jevosx doctor`/`observe`/`run` triggers the system prompt. Enable the app that runs Python
 (Terminal, iTerm, VS Code, …) under **System Settings › Privacy & Security › Accessibility**, then restart that
-app. No Screen Recording permission is needed because no screenshots are taken.
+app.
+
+**Screen Recording permission (optional).** Only needed for apps that draw their own interface (games, canvas design
+tools), whose windows are read by on-device OCR. `jevosx doctor` asks for it. Everything else works without it.
 
 **Browsers and Electron apps.** JevOSX sets `AXManualAccessibility` (Electron: Slack, VS Code, Discord, Notion…)
 and `AXEnhancedUserInterface` (Chrome, Edge, Brave, Arc…) so their web content shows up in the tree. Safari
@@ -370,6 +383,24 @@ For what only you can do (a two-factor code, a CAPTCHA, a passkey or Touch ID pr
 In the terminal the run pauses until you press Enter. In the console a **Your turn** card appears with
 **Done, continue** and **Stop the run**. After a handoff, Jev looks at the screen again and carries on.
 
+### Apps that draw their own interface
+
+Games, canvas design tools and remote desktops paint pixels instead of exposing Accessibility controls. When the
+focused window gives Accessibility almost nothing (fewer than `observer.vision_min_controls` controls and hardly
+any text), JevOSX:
+
+1. captures just that window (`screencapture -l`, deleted right after);
+2. reads its text with Apple's on-device Vision OCR;
+3. offers each line as an element such as `[12] on-screen text "New Game"`, plus a `keyboard` element that types
+   at the cursor.
+
+Jev chooses ids as usual. A click lands on the centre of the recognized text, computed from the window's frame.
+The model never sees or outputs coordinates. An unchanged window reuses the previous OCR result.
+
+This needs the **Screen Recording** permission for your terminal (`jevosx doctor` asks for it). Without it,
+everything else keeps working. `observer.vision = "always"` also reads rich apps (slower, noisier), and `"off"`
+disables it. `jevosx observe` shows a `vision:` line whenever OCR was used.
+
 ### Python API
 
 ```python
@@ -466,9 +497,10 @@ If none of these is available, `TYPE_TEXT` is not offered at all.
 
 ## Limitations
 
-- Only apps that expose an accessibility tree can be driven. Canvas-rendered UIs (games, some design tools,
-  remote desktops) and apps with custom unlabeled controls expose little or nothing. The opt-in
-  `executor.pointer_fallback` clicks an element's own AX frame centre, but it still needs the element to exist.
+- Apps that draw their own interface are read through OCR, so only controls with visible text can be clicked.
+  Icon-only buttons, drag-and-drop, drawing and real-time games are out of reach for now (see the roadmap). The
+  opt-in `executor.pointer_fallback` clicks an element's own AX frame centre, but it still needs the element to
+  exist.
 - The observer walks the focused window (including attached sheets) plus open menus. Other windows are reachable
   through `FOCUS_WINDOW`.
 - Secure input (password prompts, some banking apps) can block synthetic keystrokes system-wide.
@@ -501,5 +533,6 @@ On macOS the real pyobjc bridges are installed and every Accessibility and CGEve
 | Runs end with `low_confidence` | The screen is ambiguous for the goal. Make the goal more specific, add `--app`, use `--on-low-confidence ask`, or lower `--min-confidence`. Review `~/.jevosx/fallbacks.jsonl`. |
 | `TYPE_TEXT` never happens | Put the text in quotes in the goal or pass `--slot`. For new text ("write a poem"), run `jevosx write --check`. |
 | `jevosx write --check` says Apple Intelligence is off | System Settings › Apple Intelligence & Siri → turn it on; the model downloads in the background. `sdkMissing` means the Command Line Tools are older than macOS 26: update them, then `jevosx write --rebuild`. |
+| A game or canvas app shows nothing to click | Grant Screen Recording to your terminal (System Settings › Privacy & Security › Screen & System Audio Recording), restart it, and check `jevosx observe --delay 3` for a `vision:` line. |
 | Keystrokes go to the wrong app | The executor re-activates the observed app and re-validates the frontmost pid before input. Avoid switching apps during a run. |
 | `Jev rejected the API key` | Check `TYPESAFE_API_KEY` (`jevosx doctor`). |

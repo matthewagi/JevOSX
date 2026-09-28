@@ -44,6 +44,8 @@ ROLE_NAMES = {
     "AXTable": "table",
     "AXOutline": "outline",
     "AXList": "list",
+    "AXVisionText": "on-screen text",  # read from pixels (OCR) in apps that draw their own interface
+    "AXKeyboard": "keyboard",
 }
 SUBROLE_NAMES = {
     "AXSearchField": "search field",

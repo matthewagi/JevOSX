@@ -320,9 +320,12 @@ const RUN_TEXT = { running: "Running", success: "Verified", done: "Done", blocke
 const EXAMPLES = [
   ["Write a poem", "Open TextEdit and write a short poem about the sea"],
   ["Log in to a site", "Log in to github.com in Safari"],
+  ["App without controls", "Start a new game of Space Blocks on normal difficulty"],
   ["Search the web", 'In Safari, search for "accessibility API"'],
   ["Write and save", 'In TextEdit, write "Shopping list" and save it as "groceries"'],
   ["Needs approval", 'Delete the "Trip ideas" note in Notes'],
+  ["Browse folders", "Open Downloads in Finder"],
+  ["Type a note", 'Open TextEdit, create a new document and type "Hello from JevOSX"'],
   ["Confidence gate", "Do something interesting"],
 ];
 const state = { runs: new Map(), status: null, floor: 0.65, policy: "retry", running: false, tab: "screen", screenTimer: 0 };

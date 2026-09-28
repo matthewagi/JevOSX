@@ -18,6 +18,15 @@ def render_text_map(obs: Observation, *, menus: bool = False, text_lines: int = 
         f" · visited {stats.get('visited', '?')} nodes in {stats.get('walk_ms', '?')} ms"
         + (" · TRUNCATED" if stats.get("truncated") else "")
     )
+    vision = stats.get("vision")
+    if vision:
+        if vision.get("ran"):
+            lines.append(
+                f"  vision: {vision.get('elements', 0)} on-screen texts read by OCR in {vision.get('ms', '?')} ms"
+                + (" (unchanged image, reused)" if vision.get("cached") else "")
+            )
+        else:
+            lines.append(f"  vision: not used ({vision.get('note', 'unavailable')})")
     lines.append("")
     current = object()
     for element in obs.elements:

@@ -8,6 +8,8 @@ pyobjc-core>=10.3; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices>=10.3; sys_platform == "darwin"
 pyobjc-framework-Cocoa>=10.3; sys_platform == "darwin"
 pyobjc-framework-Quartz>=10.3; sys_platform == "darwin"
+# On-device OCR for apps that draw their own interface (games, canvas design tools)
+pyobjc-framework-Vision>=10.3; sys_platform == "darwin"
 
 # Saved website logins live in the macOS Keychain (`jevosx login add github.com`)
 keyring>=25; sys_platform == "darwin"

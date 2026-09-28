@@ -66,6 +66,10 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
         ),
         ("write a haiku about rain in Notes", lambda d: d.apps["Notes"].notes[0].startswith("Rain arrives")),
         (
+            "Start a new game of Space Blocks on normal difficulty",
+            lambda d: d.apps["Space Blocks"].screen == "playing" and d.apps["Space Blocks"].difficulty == "Normal",
+        ),
+        (
             'write a poem about autumn in TextEdit and save it as "autumn"',
             lambda d: d.apps["TextEdit"].document == "autumn" and "autumn" in d.apps["TextEdit"].body,
         ),

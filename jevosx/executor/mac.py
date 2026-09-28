@@ -83,8 +83,16 @@ class MacExecutor:
         started = time.perf_counter()
         op = action.operation
         try:
-            if op == CLICK and action.element is not None:
+            if op == CLICK and action.element is not None and action.element.kind == "visual":
+                result = self._click_visual(action.element)
+            elif op == CLICK and action.element is not None:
                 result = self._click(action.element)
+            elif op == TYPE_TEXT and action.element is not None and action.element.kind == "keyboard" and action.text:
+                if action.text_is_secret or action.secure_only:
+                    result = ActionResult(False, "refused", "secret text is only typed into password fields")
+                else:  # no field to select first: Cmd-A in a canvas app would select every object
+                    keyboard.type_text(action.text or "", delay_s=self.settings.key_delay_s)
+                    result = ActionResult(True, "keystrokes", "typed at the cursor")
             elif op == TYPE_TEXT and action.element is not None and action.text is not None:
                 refusal = self._check_credential(action)
                 if refusal is not None:
@@ -115,6 +123,13 @@ class MacExecutor:
         return result
 
     # ---- operations ---------------------------------------------------------------------------------------------
+    def _click_visual(self, element: UIElement) -> ActionResult:
+        """On-screen text read by OCR: click the centre of the recognized text (computed locally, never by a model)."""
+        if element.frame is None or element.frame.empty:
+            return ActionResult(False, "none", "the recognized text has no position")
+        keyboard.click_at(*element.frame.center)
+        return ActionResult(True, "pointer", "clicked the centre of the recognized text")
+
     def _click(self, element: UIElement) -> ActionResult:
         node = element.node
         actions = element.actions or node.actions()

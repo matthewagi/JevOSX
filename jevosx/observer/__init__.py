@@ -1,4 +1,6 @@
-"""OS observer layer: macOS Accessibility (AXUIElement) → structured, indexed text state. No pixels, no OCR."""
+"""OS observer layer: macOS Accessibility (AXUIElement) → structured, indexed text state.
+
+Pixels are read (on-device OCR, observer/vision.py) only for windows that draw their own interface."""
 
 from __future__ import annotations
 

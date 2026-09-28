@@ -8,6 +8,8 @@ If the goal needs a different application, OPEN_APP it. Prefer a MENU command or
 does exactly what is needed. TYPE_TEXT focuses the chosen field itself and replaces its content (no need to click
 or focus it first); PRESS_KEY RETURN afterwards if it must be submitted.
 Do not toggle a checkbox, switch or radio button that is already in the requested state.
+Elements with role "on-screen text" were read from the pixels of an app that draws its own interface: CLICK
+presses the middle of that text. The "keyboard" element types at the current cursor.
 SCROLL only when the needed control is probably off-screen. WAIT only while content is visibly loading or a needed
 control is disabled; recent WAITs are not evidence of loading.
 DONE requires visible evidence that every part of the goal is complete. BLOCKED means no offered operation can make

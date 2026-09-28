@@ -536,6 +536,25 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     print(f"  {mark} writer for free-form text: {status.describe()}")
     if status.hint and not status.available:
         print(f"      → optional: {status.hint}")
+    if settings.observer.vision != "off" and sys.platform == "darwin":
+        from .observer.vision import screen_recording_allowed
+
+        try:
+            import Vision  # noqa: F401
+
+            ocr = True
+        except ImportError:
+            ocr = False
+        allowed = screen_recording_allowed(prompt=True)
+        mark = "✓" if allowed and ocr else "–"
+        print(f"  {mark} vision for apps that draw their own interface (Screen Recording + on-device OCR)")
+        if not ocr:
+            print("      → optional: pip install pyobjc-framework-Vision")
+        elif not allowed:
+            print(
+                "      → optional: System Settings › Privacy & Security › Screen & System Audio Recording → enable"
+                " your terminal/IDE, then restart it"
+            )
     if settings.logins.enabled:
         from .logins import LoginError, LoginStore, keychain
 

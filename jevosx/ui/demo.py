@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from ..errors import StaleElementError
+from ..observer.vision import KEYBOARD_ROLE, VISION_CONTAINER, VISION_ROLE
 from ..router.client import JevClient
 from ..router.text import GENERATE, slots_from_goal
 from ..types import (
@@ -60,13 +61,18 @@ class Spec:
         text_input = self.role in ("AXTextField", "AXTextArea")
         ops = TEXT_OPS if text_input else ((CLICK,) if self.role != "AXStaticText" else ())
         secure = self.subrole == "AXSecureTextField"
+        kind = "text_input" if text_input else "row" if self.role == "AXRow" else "control"
+        if self.role == VISION_ROLE:  # stands in for OCR'd text in an app that draws its own interface
+            kind, ops = "visual", (CLICK,)
+        elif self.role == KEYBOARD_ROLE:
+            kind, ops = "keyboard", (TYPE_TEXT,)
         return UIElement(
             index=index,
             role=self.role,
             subrole=self.subrole,
             label=self.label,
             value=None if secure else self.value,
-            kind="text_input" if text_input else "row" if self.role == "AXRow" else "control",
+            kind=kind,
             ops=ops if self.enabled else (),
             enabled=self.enabled,
             focused=self.focused,
@@ -446,7 +452,59 @@ class Notes(DemoApp):
         return self.click("New Note") if path == "File › New Note" else "no effect"
 
 
-APP_CLASSES: tuple[type[DemoApp], ...] = (Finder, TextEdit, Safari, Notes)
+class SpaceBlocks(DemoApp):
+    """A game that draws its own interface: Accessibility sees nothing but the window. On a real Mac the observer
+    OCRs such windows (observer/vision.py); here the recognized text is simulated."""
+
+    name, bundle_id = "Space Blocks", "com.example.SpaceBlocks"
+    SCREENS = {
+        "title": ("SPACE BLOCKS", "New Game", "Continue", "Options", "Quit"),
+        "difficulty": ("Choose difficulty", "Easy", "Normal", "Hard", "Back"),
+    }
+
+    def __init__(self) -> None:
+        self.screen = "title"  # title | difficulty | playing
+        self.difficulty = ""
+        self.score = 0
+
+    def title(self) -> str:
+        return "Space Blocks"
+
+    def texts(self) -> tuple[str, ...]:
+        if self.screen == "playing":
+            return (f"Level 1 · {self.difficulty}", f"Score: {self.score}", "Lives: 3", "Press SPACE to launch")
+        return self.SCREENS[self.screen]
+
+    def specs(self) -> list[Spec]:
+        visual = [Spec(VISION_ROLE, text, container=f"{VISION_CONTAINER}, simulated") for text in self.texts()]
+        return [*visual, Spec(KEYBOARD_ROLE, "type at the cursor", container="keyboard")]
+
+    def menu(self) -> list[tuple[str, str | None]]:
+        return [("Space Blocks › Quit Space Blocks", "⌘Q")]
+
+    def text(self) -> str:
+        return "\n".join(self.texts())
+
+    def click(self, label: str) -> str:
+        if self.screen == "title" and label == "New Game":
+            self.screen = "difficulty"
+            return "difficulty menu"
+        if self.screen == "difficulty" and label in ("Easy", "Normal", "Hard"):
+            self.screen, self.difficulty, self.score = "playing", label, 0
+            return f"started level 1 ({label})"
+        if label == "Back":
+            self.screen = "title"
+            return "back to the title screen"
+        return "nothing happened"
+
+    def key(self, key_id: str) -> str:
+        if self.screen == "playing" and key_id == "SPACE":
+            self.score += 10
+            return "launched a block"
+        return "no effect"
+
+
+APP_CLASSES: tuple[type[DemoApp], ...] = (Finder, TextEdit, Safari, Notes, SpaceBlocks)
 DEMO_APP_NAMES = tuple(cls.name for cls in APP_CLASSES)
 
 
@@ -485,7 +543,7 @@ class DemoDesktop:
         ]
         window = WindowInfo(1, app.title(), focused=True)
         elapsed = round((time.perf_counter() - started) * 1000, 1)
-        return Observation(
+        obs = Observation(
             app=self._info(self.front),
             window=window,
             windows=[window],
@@ -507,6 +565,10 @@ class DemoDesktop:
             captured_at=time.time(),
             page_url=app.url(),
         )
+        if isinstance(app, SpaceBlocks):
+            visual = sum(e.kind == "visual" for e in elements)
+            obs.stats["vision"] = {"ran": True, "elements": visual, "texts": visual, "ms": 0.0, "simulated": True}
+        return obs
 
     def user_completes_handoff(self) -> None:
         """What the person does during ASK_USER in the demo: types the two-factor code from their phone."""
@@ -727,8 +789,10 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     # 2. Finished?
     finished = not pending and not compose and submitted and (not wants_save or saved) and (not wants_delete or deleted)
     finished = finished and (not wants_login or signed_in)
+    game = front == SpaceBlocks.name
     if (
         finished
+        and not game
         and wanted in (None, front)
         and (body_quotes or wants_writing or wants_save or wants_submit or wants_delete or touched or only_open)
     ):
@@ -753,6 +817,10 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
             pick = click(lambda label: label == "sign in")
             if pick:
                 return pick
+
+    # 2c. A game that draws its own interface: click the on-screen text the goal names until a level runs.
+    if game and "level 1" in seen:
+        return answer("DONE", 0.9)
 
     # 3. Delete: select the named item first, then press Delete (the safety policy asks the human).
     if wants_delete and not deleted:
@@ -814,7 +882,7 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
             return answer(MENU, 0.84, menu_target=(command, 0.88))
 
     # 8. Click what the goal names (buttons, rows, links), skipping what was already clicked.
-    goal_words = _words(goal) - {n.lower() for n in DEMO_APP_NAMES}
+    goal_words = _words(goal) - set().union(*(_words(n) for n in DEMO_APP_NAMES))
     question = questions.get("click_target")
     best: tuple[int, float, str] | None = None
     for cid, crit in (question or {}).get("criteria", {}).items():

@@ -75,7 +75,7 @@ model output coordinates, commands or passwords.
   passkeys and Touch ID. The reason is a typed choice (2fa · captcha · passkey · missing info · permission · other),
   and the run resumes after the user clicks Continue.
 
-## Phase 3: apps that draw their own interface (next)
+## Phase 3: apps that draw their own interface (done)
 
 **Research.**
 - The `screencapture -x -o -l <window id>` command captures one window. It needs the Screen Recording permission,

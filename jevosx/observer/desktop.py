@@ -1,5 +1,6 @@
 """macOS desktop observer: frontmost app → focused window AX tree → indexed element table, plus menus, windows,
-running and installed apps. Produces an `Observation`; never takes a screenshot and never runs OCR."""
+running and installed apps. Produces an `Observation`. Windows that draw their own interface are additionally read
+with on-device OCR (see vision.py); no other window is ever captured."""
 
 from __future__ import annotations
 
@@ -10,10 +11,11 @@ from typing import Any
 
 from ..config import ObserverSettings
 from ..errors import StaleElementError
-from ..types import AppInfo, Observation, UIElement, WindowInfo, clean_text
+from ..types import AppInfo, Observation, UIElement, WindowInfo, clean_text, is_console_window
 from . import apps as appmod
 from .ax import AX_SUCCESS, AXNode, require_ax
 from .menus import walk_menu_bar
+from .vision import VisionReader, keyboard_element, needs_vision, visual_elements
 from .walker import TreeWalker, WalkLimits
 
 # Chromium browsers only build their web accessibility tree when an assistive client asks for it.
@@ -52,6 +54,7 @@ class MacDesktopObserver:
         self._web_enabled: set[int] = set()
         self._menu_cache: dict[int, tuple[float, list[UIElement], bool]] = {}
         self._installed: list[AppInfo] | None = None
+        self.vision = VisionReader() if s.vision != "off" else None
 
     # ---- public API ---------------------------------------------------------------------------------------------
     def frontmost_pid(self) -> int | None:
@@ -136,6 +139,7 @@ class MacDesktopObserver:
         except StaleElementError:
             pass
         walk = self.walker.walk(roots)
+        elements, text, vision = self._with_vision(pid, focused_window, walk.elements, walk.text)
 
         menu_items: list[UIElement] = []
         menus_truncated = False
@@ -153,14 +157,16 @@ class MacDesktopObserver:
             "notes": walk.notes,
             "skipped": walk.skipped,
         }
+        if vision is not None:
+            stats["vision"] = vision
         obs = Observation(
             app=app,
             window=focused_window,
             windows=windows,
-            elements=walk.elements,
+            elements=elements,
             menu_items=menu_items,
             scroll_areas=walk.scroll_areas,
-            text=walk.text,
+            text=text,
             running_apps=running,
             installed_apps=self.installed_apps(),
             stats=stats,
@@ -171,6 +177,35 @@ class MacDesktopObserver:
         return obs
 
     # ---- internals ----------------------------------------------------------------------------------------------
+    def _with_vision(
+        self, pid: int, window: WindowInfo | None, elements: list[UIElement], text: str
+    ) -> tuple[list[UIElement], str, dict[str, Any] | None]:
+        """Add OCR'd on-screen text for windows that draw their own interface (see observer/vision.py)."""
+        s = self.settings
+        if self.vision is None or window is None or is_console_window(window.title):
+            return elements, text, None
+        if not needs_vision(s.vision, elements, text, min_controls=s.vision_min_controls):
+            return elements, text, None
+        result = self.vision.read(pid, window.title)
+        stats = result.stats()
+        if not result.ok or result.bounds is None:
+            return elements, text, stats
+        visual, lines = visual_elements(
+            result.boxes,
+            result.bounds,
+            existing=elements,
+            ax_text=text,
+            start_index=len(elements) + 1,
+            max_items=s.vision_max_items,
+            min_confidence=s.vision_min_confidence,
+        )
+        combined = [*elements, *visual]
+        if visual:
+            combined.append(keyboard_element(len(combined) + 1))
+        seen_text = "\n".join(lines)[: s.max_text_chars]
+        stats["elements"] = len(visual)
+        return combined, (text + "\n" + seen_text).strip(), stats
+
     def _windows(self, node: AXNode) -> tuple[list[WindowInfo], WindowInfo | None]:
         try:
             focused = node.get("AXFocusedWindow") or node.get("AXMainWindow")

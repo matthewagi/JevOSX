@@ -30,6 +30,12 @@ include_installed_apps = true
 app_dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", "~/Applications"]
 messaging_timeout_s = 0.5          # per-AX-call timeout so a hung app cannot stall the agent
 enable_web_accessibility = true    # AXManualAccessibility (Electron) / AXEnhancedUserInterface (Chromium)
+# Apps that draw their own interface (games, canvas design tools): capture the focused window and read its text
+# with Apple's on-device OCR when Accessibility sees almost nothing. Needs the Screen Recording permission.
+vision = "auto"                    # auto | always | off
+vision_min_controls = 4            # auto: fewer interactive elements than this, and hardly any text
+vision_max_items = 60
+vision_min_confidence = 0.35
 
 [executor]
 typing_mode = "auto"               # auto | ax (AXValue writes) | keys (Unicode keystrokes)

@@ -60,6 +60,42 @@ OPERATION_TEXT = {
 
 _WORD = re.compile(r"\w+")
 
+# Idle apps offered because they fit what the goal asks for, although it does not name them ("write a poem" → TextEdit).
+# A group only adds apps when none of its apps is already running, so a running browser is not joined by others.
+INTENT_APPS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tuple(
+    (re.compile(pattern, re.IGNORECASE), apps)
+    for pattern, apps in (
+        (r"\b(?:write|poem|haiku|story|essay|letter|document|draft|type up)\b", ("TextEdit", "Pages", "Notes")),
+        (r"\b(?:note|notes|jot)\b", ("Notes",)),
+        (r"\b(?:e-?mail|inbox)\b", ("Mail",)),
+        (
+            r"\b(?:search|browse|website|google|look up|look for|online|log ?in|sign ?in)\b|\.(?:com|org|net|io)\b",
+            ("Safari", "Google Chrome", "Firefox", "Arc", "Microsoft Edge", "Brave Browser"),
+        ),
+        (r"\b(?:calendar|meeting|appointment)\b", ("Calendar",)),
+        (r"\b(?:remind me|reminders?|to-?do)\b", ("Reminders",)),
+        (r"\b(?:spreadsheet|budget)\b", ("Numbers",)),
+        (r"\b(?:presentation|slides|keynote)\b", ("Keynote",)),
+        (r"\b(?:song|playlist|album)\b", ("Music",)),
+        (r"\b(?:imessage|text message)\b", ("Messages",)),
+        (r"\b(?:calculate|calculator)\b", ("Calculator",)),
+        (r"\b(?:directions|map of)\b", ("Maps",)),
+        (r"\b(?:folder|downloads|finder)\b", ("Finder",)),
+        (r"\b(?:terminal|shell command|command line)\b", ("Terminal",)),
+        (r"\b(?:wi-?fi|bluetooth|system settings|dark mode)\b", ("System Settings",)),
+        (r"\b(?:timer|alarm|stopwatch)\b", ("Clock",)),
+    )
+)
+
+
+def intent_apps(goal: str, running: set[str]) -> set[str]:
+    """Names of idle apps worth offering for this goal (see INTENT_APPS)."""
+    wanted: set[str] = set()
+    for pattern, apps in INTENT_APPS:
+        if pattern.search(goal) and not running & {a.lower() for a in apps}:
+            wanted.update(a.lower() for a in apps)
+    return wanted
+
 
 @dataclass(slots=True)
 class Target:
@@ -177,10 +213,14 @@ class ActionSpace:
                 ),
             )
         position = 0
+        running_names = {a.name.lower() for a in obs.running_apps}
+        suggested = intent_apps(goal, running_names) if offer_installed_apps == "mentioned" else set()
         for app in [*obs.running_apps, *obs.installed_apps]:
             if app.key == obs.app.key or (app.pid is not None and app.pid == obs.app.pid):
                 continue
-            if not app.running and not _offer_installed(app, goal, offer_installed_apps):
+            if not app.running and not (
+                _offer_installed(app, goal, offer_installed_apps) or app.name.lower() in suggested
+            ):
                 continue  # context guardrail: dozens of idle apps would only cost tokens
             if any(t.app is not None and t.app.key == app.key for t in heads.get(HEADS[OPEN_APP], {}).values()):
                 continue

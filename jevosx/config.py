@@ -162,6 +162,18 @@ class TextModelSettings:
 
 
 @dataclass
+class WriterSettings:
+    """Who composes free-form text for goals like "write a poem" (Jev never writes text itself)."""
+
+    backend: str = "auto"  # auto ([text_model] if configured, else Apple's on-device model) | apple | openai | off
+    offer: str = "auto"  # auto: offer GENERATE only when the goal asks for new text | always
+    temperature: float = 0.7
+    max_tokens: int = 800
+    timeout_s: float = 60.0
+    helper_dir: str = "~/.jevosx/bin"  # where the compiled Apple helper lives
+
+
+@dataclass
 class KeySettings:
     custom: dict[str, str] = field(default_factory=dict)  # e.g. {"SEND" = "cmd+shift+d"}
     disabled: list[str] = field(default_factory=list)
@@ -176,6 +188,7 @@ class Settings:
     safety: SafetySettings = field(default_factory=SafetySettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     text_model: TextModelSettings = field(default_factory=TextModelSettings)
+    writer: WriterSettings = field(default_factory=WriterSettings)
     keys: KeySettings = field(default_factory=KeySettings)
 
     @classmethod
@@ -213,6 +226,7 @@ class Settings:
             "JEVOSX_MAX_STEPS": (self.agent, "max_steps", int),
             "TEXT_MODEL": (self.text_model, "model", str),
             "TEXT_MODEL_BASE_URL": (self.text_model, "base_url", str),
+            "JEVOSX_WRITER": (self.writer, "backend", str),
         }
         for name, (section, attr, kind) in overrides.items():
             if env.get(name):
@@ -230,6 +244,8 @@ class Settings:
             "agent.low_confidence_policy": (self.agent.low_confidence_policy, ("retry", "ask", "stop")),
             "jev.offer_installed_apps": (self.jev.offer_installed_apps, ("mentioned", "all", "none")),
             "executor.typing_mode": (self.executor.typing_mode, ("auto", "ax", "keys")),
+            "writer.backend": (self.writer.backend, ("auto", "apple", "openai", "off")),
+            "writer.offer": (self.writer.offer, ("auto", "always")),
         }
         for name, (value, allowed) in choices.items():
             if value not in allowed:

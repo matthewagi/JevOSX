@@ -163,6 +163,19 @@ else
   warn "not macOS: skipped"
 fi
 
+# ---- 5b. On-device writer (optional) --------------------------------------------------------------------------------
+step "On-device writer (Apple Intelligence, optional)"
+if [ "$(uname -s)" = "Darwin" ]; then
+  # Compiles the small Swift helper once (up to a minute) and reports whether Apple's model is ready.
+  if .venv/bin/jevosx write --check; then
+    ok "JevOSX can compose text on this Mac (\"write a poem about autumn in TextEdit\")"
+  else
+    warn "optional: without it JevOSX still types quoted text, it just cannot compose new text"
+  fi
+else
+  warn "not macOS: skipped"
+fi
+
 # ---- 6. Launchers --------------------------------------------------------------------------------------------------
 step "Shortcuts"
 mkdir -p "$HOME/.local/bin"

@@ -21,7 +21,7 @@ import httpx
 
 from ..errors import StaleElementError
 from ..router.client import JevClient
-from ..router.text import slots_from_goal
+from ..router.text import GENERATE, slots_from_goal
 from ..types import (
     CLICK,
     MENU,
@@ -37,6 +37,7 @@ from ..types import (
     UIElement,
     WindowInfo,
 )
+from ..writer import wants_generation
 
 TEXT_OPS = (TYPE_TEXT, CLICK)
 
@@ -554,7 +555,7 @@ def _words(text: str) -> set[str]:
 def _infer_app(lowered: str, explicit: str | None) -> str | None:
     if explicit:
         return explicit
-    if re.search(r"\bdocument\b", lowered):
+    if re.search(r"\b(document|poem|haiku|story|essay|letter)\b", lowered):
         return "TextEdit"
     if re.search(r"\bnotes?\b", lowered):
         return "Notes"
@@ -605,9 +606,13 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     wants_submit = bool(re.search(r"\b(search|go to|visit|look (?:up|for)|google|browse)\b", lowered))
     wants_delete = bool(re.search(r"\b(delete|remove|trash)\b", lowered))
     typing = bool(re.search(r"\b(type|write|enter|search|look|google|fill|put|say|add|go to|visit)\b", lowered))
-    file_name = quotes[-1] if wants_save and len(quotes) > 1 else None
+    named = re.search(r"\bsave\s+(?:it\s+|this\s+|the\s+\w+\s+)?as\s+[\"“]([^\"”]+)", goal, re.IGNORECASE)
+    file_name = named.group(1) if wants_save and named else quotes[-1] if wants_save and len(quotes) > 1 else None
     body_quotes = [q for q in quotes if q != file_name] if typing else []
     pending = [q for q in body_quotes if q.lower() not in seen]
+    # "write a poem about the sea": nothing to copy from the goal, the writer composes it (GENERATE).
+    wants_writing = wants_generation(goal)
+    compose = wants_writing and not any(a.startswith("TYPE_TEXT") and '"save as"' not in a.lower() for a in effective)
     saving = any("sheet" in str(e.get("in", "")) for e in elements)
     saved = not saving and window not in ("untitled", "open") and (file_name is None or file_name.lower() == window)
     submitted = not wants_submit or any(q.lower() in window for q in quotes) or "results for" in seen
@@ -626,11 +631,11 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         return answer(OPEN_APP, 0.95, **({"app_target": (app_id, 0.96)} if app_id else {}))
 
     # 2. Finished?
-    finished = not pending and submitted and (not wants_save or saved) and (not wants_delete or deleted)
+    finished = not pending and not compose and submitted and (not wants_save or saved) and (not wants_delete or deleted)
     if (
         finished
         and wanted in (None, front)
-        and (body_quotes or wants_save or wants_submit or wants_delete or touched or only_open)
+        and (body_quotes or wants_writing or wants_save or wants_submit or wants_delete or touched or only_open)
     ):
         return answer("DONE", 0.93)
 
@@ -646,9 +651,10 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
             return pick
 
     # 4. Save: open the Save sheet, name the file, confirm.
-    if wants_save and not pending and not saved:
+    if wants_save and not pending and not compose and not saved:
         if saving:
-            if file_name and file_name.lower() not in seen and TYPE_TEXT in ops:
+            name_field: dict[str, Any] = next((e for e in elements if e["label"].lower() == "save as"), {})
+            if file_name and str(name_field.get("value", "")).lower() != file_name.lower() and TYPE_TEXT in ops:
                 field_id = _find(questions.get("type_text_target"), lambda label: label == "save as")
                 slot = _find(questions.get("text_slot"), lambda label: file_name.lower().startswith(label.rstrip("…")))
                 save_heads = {"type_text_target": (field_id, 0.9)} if field_id else {}
@@ -665,14 +671,17 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         key = _find(questions.get("key_target"), lambda label: label == "return")
         return answer(PRESS_KEY, 0.9, **({"key_target": (key, 0.94)} if key else {}))
 
-    # 6. Type the next quoted text.
-    if pending and TYPE_TEXT in ops:
+    # 6. Type the next quoted text, or have the writer compose it.
+    if (pending or compose) and TYPE_TEXT in ops:
         goal_words = _words(goal)
         target = questions.get("type_text_target")
         field_id = _find(target, lambda label: bool(_words(label) & goal_words) and label != "save as") or _find(
             target, lambda label: label in ("body", "note", "search or enter website name")
         )
-        slot = _find(questions.get("text_slot"), lambda label: pending[0].lower().startswith(label.rstrip("…")))
+        if pending:
+            slot = _find(questions.get("text_slot"), lambda label: pending[0].lower().startswith(label.rstrip("…")))
+        else:
+            slot = GENERATE if GENERATE in questions.get("text_slot", {}).get("criteria", {}) else None
         heads: dict[str, Pick] = {}
         if field_id:
             heads["type_text_target"] = (field_id, 0.9)
@@ -681,7 +690,7 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         return answer(TYPE_TEXT, 0.9, **heads)
 
     # 7. Nowhere to type yet: New Document / New Note.
-    if pending:
+    if pending or compose:
         pick = click(lambda label: label.startswith("new "), 0.88)
         if pick:
             return pick

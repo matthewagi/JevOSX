@@ -87,7 +87,13 @@ jevosx/
 │   ├── space.py         #   dynamic action space: operations and compatible targets per observation
 │   ├── policy.py        #   state building, context budget, request contract, decision decoding
 │   ├── prompts.py       #   instructions sent with each question
-│   └── text.py          #   TYPE_TEXT sources: text slots, goal literals, optional text model
+│   └── text.py          #   TYPE_TEXT sources: text slots, goal literals, GENERATE via the writer
+├── writer/              # Free-form text ("write a poem"): Jev picks the field, a writer fills in the words
+│   ├── apple.py         #   Apple's on-device model via a compiled Swift helper (build, check, requests)
+│   ├── apple_writer.swift  # the helper: Foundation Models over JSON stdin/stdout
+│   ├── openai.py        #   optional OpenAI-compatible chat model
+│   ├── base.py          #   when to offer writing, prompts, output cleanup
+│   └── simulated.py     #   canned writer for demo mode
 ├── executor/            # Execution engine
 │   ├── mac.py           #   MacExecutor: AX actions, value writes, scrolling, app activation/launch
 │   ├── input.py         #   CGEvent keyboard (layout-independent Unicode) and opt-in pointer fallback
@@ -105,7 +111,8 @@ jevosx/
 │   ├── server.py        #   stdlib HTTP + Server-Sent Events, run manager, approvals, token/Host guards
 │   ├── demo.py          #   simulated Mac + simulated decisions for `--demo`
 │   └── static/          #   single-file front end (no external resources)
-└── cli.py               # `jevosx run | observe | ui | doctor | memory`
+└── cli.py               # `jevosx run | observe | ui | write | diagnose | doctor | report | memory`
+docs/                    # ROADMAP.md: research notes, phases and risks
 examples/                # run_agent.py (Python API), dump_tree.py (inspect what the agent sees)
 config/                  # jevosx.example.toml: every setting with its default
 scripts/                 # install.sh (one-line installer), bootstrap.sh (venv + install + doctor)
@@ -312,6 +319,26 @@ jevosx run "…" --trace run.jsonl --feedback            # JSONL trace; label th
 
 Exit codes: `0` success/done, `1` blocked, failed, low confidence or out of steps, `2` configuration or platform error.
 
+### Writing new text
+
+Jev only chooses; it never writes. When a goal asks for text that is not in it ("write a poem about autumn in
+TextEdit", "reply to Anna saying I'm late", "summarize this page in a new note"), JevOSX offers one more text option,
+`GENERATE`. If Jev picks it for the field it chose, a *writer* composes only that field's content:
+
+- **Apple's on-device model** (the default on macOS 26 with Apple Intelligence turned on). It is free and private,
+  and it works offline. JevOSX compiles a ~150-line Swift helper once with the Command Line Tools into
+  `~/.jevosx/bin/`; Apple's Python SDK would need the full Xcode.
+- **Any OpenAI-compatible model** set in `[text_model]`, for Intel Macs or older macOS.
+
+```bash
+jevosx run "Open TextEdit and write a short poem about autumn"
+jevosx write "a haiku about the sea"     # try the writer on its own
+jevosx write --check                     # is Apple's model ready? If not, it says why and how to fix it
+```
+
+The writer never fills password fields. It gets screen text as context only, and it composes each field once per
+run, so a retry types the same text instead of a new poem. Goals that name the text (`type "hello"`) never use it.
+
 ### Python API
 
 ```python
@@ -441,6 +468,7 @@ On macOS the real pyobjc bridges are installed and every Accessibility and CGEve
 | `Accessibility access is not granted` | Enable your terminal/IDE in System Settings › Privacy & Security › Accessibility, then restart it. After a Python upgrade, remove and re-add the entry. |
 | Browser pages show almost no elements | Give Chrome/Electron a second after launch (web accessibility turns on lazily). In Safari, make sure the page has finished loading. |
 | Runs end with `low_confidence` | The screen is ambiguous for the goal. Make the goal more specific, add `--app`, use `--on-low-confidence ask`, or lower `--min-confidence`. Review `~/.jevosx/fallbacks.jsonl`. |
-| `TYPE_TEXT` never happens | Put the text in quotes in the goal, pass `--slot`, or configure `[text_model]`. |
+| `TYPE_TEXT` never happens | Put the text in quotes in the goal or pass `--slot`. For new text ("write a poem"), run `jevosx write --check`. |
+| `jevosx write --check` says Apple Intelligence is off | System Settings › Apple Intelligence & Siri → turn it on; the model downloads in the background. `sdkMissing` means the Command Line Tools are older than macOS 26: update them, then `jevosx write --rebuild`. |
 | Keystrokes go to the wrong app | The executor re-activates the observed app and re-validates the frontmost pid before input. Avoid switching apps during a run. |
 | `Jev rejected the API key` | Check `TYPESAFE_API_KEY` (`jevosx doctor`). |

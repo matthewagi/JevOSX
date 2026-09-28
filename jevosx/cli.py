@@ -1,4 +1,4 @@
-"""Command-line interface: `jevosx run | observe | ui | diagnose | doctor | memory`."""
+"""Command-line interface: `jevosx run | observe | ui | write | diagnose | doctor | report | memory`."""
 
 from __future__ import annotations
 
@@ -87,6 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--depth", type=int, default=12, help="raw tree depth to print (default 12)")
     diagnose.set_defaults(handler=cmd_diagnose)
 
+    write = sub.add_parser("write", help="compose text with the writer (Apple's on-device model by default)")
+    write.add_argument("request", nargs="?", help='what to write, e.g. "a haiku about the sea"')
+    write.add_argument("--check", action="store_true", help="only report whether the writer is available and why")
+    write.add_argument("--rebuild", action="store_true", help="recompile the Apple on-device helper")
+    write.add_argument("--backend", choices=["auto", "apple", "openai"], help="override [writer] backend")
+    write.set_defaults(handler=cmd_write)
+
     doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
     doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
     doctor.set_defaults(handler=cmd_doctor)
@@ -152,7 +159,9 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     if args.delay:
         print(f"starting in {args.delay:.1f}s…")
         time.sleep(args.delay)
-    agent = Agent.from_settings(settings, dry_run=args.dry_run, use_memory=not args.no_memory, confirm=confirm)
+    agent = Agent.from_settings(
+        settings, dry_run=args.dry_run, use_memory=not args.no_memory, confirm=confirm, notify=_notify
+    )
     max_steps = 1 if args.dry_run and not args.max_steps else args.max_steps
     trace = args.trace.open("w", encoding="utf-8") if args.trace else None
     try:
@@ -179,6 +188,10 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     finally:
         if trace:
             trace.close()
+
+
+def _notify(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 def parse_slots(values: list[str]) -> dict[str, str]:
@@ -347,6 +360,36 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+# ---- write -------------------------------------------------------------------------------------------------------
+def cmd_write(args: argparse.Namespace, settings: Settings) -> int:
+    """Try the writer on its own: `jevosx write "a haiku about rain"`, or `--check` for why it is unavailable."""
+    from .errors import TextUnavailableError
+    from .writer import create_writer
+
+    if not args.check and not args.request:
+        print('usage: jevosx write "a haiku about the sea"   (or --check)', file=sys.stderr)
+        return 2
+    writer, status = create_writer(settings, notify=_notify, rebuild=args.rebuild, backend=args.backend)
+    if args.check or writer is None:
+        print(f"writer {status.describe()}")
+        if status.hint and not status.available:
+            print(f"  → {status.hint}")
+        return 0 if status.available else 1
+    started = time.perf_counter()
+    try:
+        text = writer.write(
+            {"goal": f"Write {args.request}", "field": {"label": "Document", "role": "textarea", "current_value": ""}}
+        )
+    except TextUnavailableError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        writer.close()
+    print(text)
+    print(f"— {writer.model}, {time.perf_counter() - started:.1f}s", file=sys.stderr)
+    return 0
+
+
 # ---- doctor ------------------------------------------------------------------------------------------------------
 def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     failures = 0
@@ -412,6 +455,16 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             f"text model {settings.text_model.model} key",
             settings.text_model.api_key_env,
         )
+    from .writer import create_writer
+
+    writer, status = create_writer(settings, notify=_notify)
+    if writer is not None:
+        writer.close()
+    # Optional: without a writer JevOSX still types quoted text; it only cannot compose new text ("write a poem").
+    mark = "✓" if status.available else "–"
+    print(f"  {mark} writer for free-form text: {status.describe()}")
+    if status.hint and not status.available:
+        print(f"      → optional: {status.hint}")
 
     if args.live and key:
         from .router.client import JevClient, choice_question

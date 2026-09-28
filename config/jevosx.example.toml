@@ -71,8 +71,19 @@ stuck_after = 3                    # consecutive actions with no visible change 
 history_size = 8
 max_done_rejections = 2
 
+[writer]
+# Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).
+# auto: the [text_model] below if configured, otherwise Apple's on-device model (macOS 26+, Apple Intelligence on;
+# free, private, offline; JevOSX compiles a small Swift helper into helper_dir on first use).
+backend = "auto"                   # auto | apple | openai | off
+offer = "auto"                     # auto: only when the goal asks for new text | always
+temperature = 0.7
+max_tokens = 800
+timeout_s = 60.0
+helper_dir = "~/.jevosx/bin"
+
 [text_model]
-# Optional OpenAI-compatible model that writes TYPE_TEXT values when no prepared text slot fits.
+# Optional OpenAI-compatible model, used as the writer when configured (see [writer]).
 # Disabled while `model` is empty. Jev itself never generates text.
 api_key_env = "TEXT_MODEL_API_KEY"
 base_url = "https://openrouter.ai/api/v1"

@@ -24,6 +24,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # Compile the Apple on-device writer against the Foundation Models SDK when the runner has Xcode 26.
+      - name: Select Xcode 26 if installed
+        if: runner.os == 'macOS'
+        run: |
+          latest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcrun --sdk macosx --show-sdk-version
       - run: python -m pip install -r requirements-dev.txt -e .
       - run: ruff check .
       - run: ruff format --check .

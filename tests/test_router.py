@@ -171,7 +171,8 @@ def test_slots_from_goal_and_text_resolution():
     obs = sample_obs()
     field = obs.elements[1]
     source = TextSource({"password": "s3cret"})
-    assert source.resolve("password", goal="g", element=field, obs=obs, history=[]) == ("s3cret", True, "slot:password")
+    resolved = source.resolve("password", goal="g", element=field, obs=obs, history=[])
+    assert (resolved.text, resolved.secret, resolved.source) == ("s3cret", True, "slot:password")
     with pytest.raises(TextUnavailableError):
         TextSource({}).resolve(GENERATE, goal="g", element=field, obs=obs, history=[])
 
@@ -216,3 +217,17 @@ def test_console_window_only_offers_new_window_or_app_switch():
 )
 def test_goal_phrases_become_choosable_text(goal, slots):
     assert slots_from_goal(goal) == slots
+
+
+def test_idle_apps_that_fit_the_goal_are_offered_without_being_named():
+    chrome = AppInfo("Google Chrome", "com.google.Chrome", pid=5)
+    installed = [AppInfo(n, f"com.apple.{n}") for n in ("TextEdit", "Safari", "Mail", "Calculator")]
+    obs = observation([], app=chrome, running=[chrome], installed=installed, window="JevOSX Console")
+
+    def offered(goal):
+        return {t.app.name for t in router().space(obs, TextSource({}), goal).targets_for("OPEN_APP").values()}
+
+    assert offered("write a poem about autumn") == {"TextEdit"}
+    assert offered("search the web for red flowers") == set()  # a browser is already running
+    assert offered("what is 17 times 23? calculate it") == {"Calculator"}
+    assert offered("Open Mail") == {"Mail"}  # named apps still count

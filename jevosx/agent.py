@@ -29,7 +29,7 @@ from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import Observer
 from .router.policy import Decision, JevRouter
-from .router.text import LLMTextWriter, TextSource, slots_from_goal
+from .router.text import TextSource, slots_from_goal
 from .types import (
     BLOCKED,
     DONE,
@@ -45,6 +45,7 @@ from .types import (
     clean_text,
     is_console_window,
 )
+from .writer import TextWriter, create_writer, wants_generation
 
 log = logging.getLogger("jevosx")
 
@@ -149,7 +150,7 @@ class Agent:
         settings: Settings | None = None,
         safety: SafetyPolicy | None = None,
         memory: MemoryStore | None = None,
-        text_writer: LLMTextWriter | None = None,
+        text_writer: TextWriter | None = None,
         confirm: ConfirmFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -180,8 +181,9 @@ class Agent:
         use_memory: bool = True,
         confirm: ConfirmFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
+        notify: Callable[[str], None] | None = None,
     ) -> Agent:
-        """Wire the real macOS observer/executor, the Jev client and local memory from settings."""
+        """Wire the real macOS observer/executor, the Jev client, the text writer and local memory from settings."""
         from .executor import create_executor, key_vocabulary
         from .memory.embedding import HashingEmbedder
         from .observer import create_observer
@@ -199,15 +201,8 @@ class Agent:
         memory = None
         if use_memory and settings.memory.enabled:
             memory = MemoryStore(settings.memory_path, HashingEmbedder(settings.memory.dim))
-        writer = None
-        text_key = settings.text_model.api_key()
-        if settings.text_model.model and text_key:
-            writer = LLMTextWriter(
-                base_url=settings.text_model.base_url,
-                api_key=text_key,
-                model=settings.text_model.model,
-                timeout_s=settings.text_model.timeout_s,
-            )
+        writer, status = create_writer(settings, notify=notify)
+        log.info("text writer: %s", status.describe())
         return cls(
             observer=observer,
             executor=executor,
@@ -240,7 +235,11 @@ class Agent:
             raise ValueError("goal must not be empty")
         cfg = self.settings.agent
         max_steps = max_steps or cfg.max_steps
-        text_source = TextSource({**slots_from_goal(goal), **(text_slots or {})}, self.text_writer)
+        text_source = TextSource(
+            {**slots_from_goal(goal), **(text_slots or {})},
+            self.text_writer,
+            generate=self.settings.writer.offer == "always" or wants_generation(goal),
+        )
         history: list[dict[str, Any]] = []
         events: list[StepEvent] = []
         started = self.clock()
@@ -461,7 +460,10 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
                 event.status = "acted" if result.ok else "failed"
                 event.result = result
-                event.message = " · ".join(m for m in (event.message, result.detail) if m)
+                written = ""
+                if action.text_source.startswith("model:") and action.text is not None:
+                    written = f"{len(action.text)} characters written by {action.text_source[6:]}"
+                event.message = " · ".join(m for m in (event.message, written, result.detail) if m)
                 event.timings.update(act_ms=_ms(t4, t5), settle_ms=_ms(t5, t6))
                 yield emit(event)
         except KeyboardInterrupt:
@@ -586,10 +588,12 @@ class Agent:
         action = self._preview_action(decision)
         if decision.operation == TYPE_TEXT:
             assert action.element is not None
-            text, secret, _source = text_source.resolve(
+            resolved = text_source.resolve(
                 decision.text_option, goal=goal, element=action.element, obs=obs, history=history
             )
-            action.text, action.text_is_secret = text, secret
+            action.text, action.text_is_secret, action.text_source = resolved.text, resolved.secret, resolved.source
+            action.text_label, action.require_host = resolved.label, resolved.host
+            action.secure_only = resolved.secure_only
         return action
 
     def _record(
@@ -658,7 +662,13 @@ def _typing_tip(text_source: TextSource) -> str:
 def _history_action(action: Action) -> str:
     text = action.describe()
     if action.operation == TYPE_TEXT and action.text is not None:
-        text += " ← " + ("(secret)" if action.text_is_secret else repr(clean_text(action.text, 60)))
+        if action.text_label:
+            shown = f"({action.text_label})"
+        elif action.text_is_secret:
+            shown = "(secret)"
+        else:
+            shown = repr(clean_text(action.text, 60))
+        text += " ← " + shown
     return text
 
 

@@ -1,22 +1,23 @@
 """Where TYPE_TEXT values come from. Jev chooses; it never writes free text.
 
-1. Prepared text slots (from the caller, or quoted strings in the goal). Jev picks the slot in the same request.
-2. Optionally, a small OpenAI-compatible model writes a value when no slot fits (`GENERATE`). Off by default.
+1. Prepared text slots (from the caller, or quoted strings, phrases and URLs in the goal). Jev picks the slot.
+2. When the goal asks for new text ("write a poem"), a writer composes it (`GENERATE`): Apple's on-device model or an
+   optional OpenAI-compatible model (see jevosx.writer). Jev still picks the field and whether to type.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 from ..errors import TextUnavailableError
 from ..types import Observation, UIElement, clean_text
-from .prompts import TEXT_WRITER
+from ..writer.base import TextWriter
+from ..writer.openai import LLMTextWriter
+
+__all__ = ["GENERATE", "LLMTextWriter", "ResolvedText", "TextSlot", "TextSource", "slots_from_goal"]
 
 GENERATE = "GENERATE"
 SECRET_NAME = re.compile(r"secret|password|passcode|passwd|token|\bpin\b|otp", re.IGNORECASE)
@@ -69,76 +70,60 @@ def slots_from_goal(goal: str) -> dict[str, str]:
 class TextSlot:
     name: str
     value: str
+    # Credential slots (see jevosx.logins): bound to one site, never shown in history, passwords only into
+    # password fields.
+    host: str | None = None
+    label: str | None = None  # shown instead of the value in previews, history and logs
+    secure_only: bool = False
 
     @property
     def secret(self) -> bool:
-        return bool(SECRET_NAME.search(self.name))
+        return self.secure_only or bool(SECRET_NAME.search(self.name))
 
     @property
     def preview(self) -> str:
-        return "••••••" if self.secret else clean_text(self.value, 60)
+        if self.secret:
+            return "••••••"
+        return self.label or clean_text(self.value, 60)
 
 
-class LLMTextWriter:
-    def __init__(
-        self,
-        *,
-        base_url: str,
-        api_key: str,
-        model: str,
-        timeout_s: float = 15.0,
-        transport: httpx.BaseTransport | None = None,
-    ):
-        self.model = model
-        self.url = base_url.rstrip("/") + "/chat/completions"
-        self._http = httpx.Client(
-            timeout=timeout_s, headers={"Authorization": f"Bearer {api_key}"}, transport=transport
-        )
+@dataclass(frozen=True, slots=True)
+class ResolvedText:
+    """What TYPE_TEXT will type, and where it came from."""
 
-    def write(self, context: Mapping[str, Any]) -> str:
-        response = self._http.post(
-            self.url,
-            json={
-                "model": self.model,
-                "max_tokens": 512,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": TEXT_WRITER},
-                    {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
-                ],
-            },
-        )
-        if response.is_error:
-            raise TextUnavailableError(f"text model returned HTTP {response.status_code}; nothing typed")
-        try:
-            output = json.loads(response.json()["choices"][0]["message"]["content"])
-            value = output["text"]
-            if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 4000:
-                raise ValueError
-        except (ValueError, KeyError, TypeError, IndexError):
-            raise TextUnavailableError("text model returned no usable value; nothing typed") from None
-        return value
-
-    def close(self) -> None:
-        self._http.close()
+    text: str
+    secret: bool
+    source: str  # slot:<name> | model:<writer>
+    label: str | None = None  # history/log display instead of the text
+    host: str | None = None  # the web page host that must still be on screen when typing
+    secure_only: bool = False
 
 
 class TextSource:
-    def __init__(self, slots: Mapping[str, str] | None = None, writer: LLMTextWriter | None = None):
+    def __init__(
+        self,
+        slots: Mapping[str, str] | None = None,
+        writer: TextWriter | None = None,
+        *,
+        generate: bool = True,
+    ):
         self.slots = {name: TextSlot(name, value) for name, value in (slots or {}).items() if value}
         self.writer = writer
+        # GENERATE is offered only when a writer exists and the goal asks for new text (see writer.wants_generation).
+        self.generate = writer is not None and generate
+        self._generated: dict[str, str] = {}
 
     @property
     def available(self) -> bool:
-        return bool(self.slots) or self.writer is not None
+        return bool(self.slots) or self.generate
 
     def options(self) -> dict[str, dict[str, Any]]:
         """Criteria for the `text_slot` question."""
         options: dict[str, dict[str, Any]] = {
             name: {"text_name": name, "preview": slot.preview} for name, slot in self.slots.items()
         }
-        if self.writer is not None:
-            options[GENERATE] = {"text_name": "generate", "preview": "compose new text for this field from the goal"}
+        if self.generate:
+            options[GENERATE] = {"text_name": "generate", "preview": "the writer composes the text the goal asks for"}
         return options
 
     def default_option(self) -> str | None:
@@ -153,24 +138,28 @@ class TextSource:
         element: UIElement,
         obs: Observation,
         history: list[dict[str, Any]],
-    ) -> tuple[str, bool, str]:
-        """Return (text, is_secret, source) for the chosen option."""
+    ) -> ResolvedText:
+        """The text for the chosen option (a prepared slot, or the writer's composition)."""
         if option in self.slots:
             slot = self.slots[option]
-            return slot.value, slot.secret, f"slot:{slot.name}"
-        if self.writer is not None and (option == GENERATE or not self.slots):
+            return ResolvedText(slot.value, slot.secret, f"slot:{slot.name}", slot.label, slot.host, slot.secure_only)
+        if self.generate and self.writer is not None and (option == GENERATE or not self.slots):
             if element.secure:
                 raise TextUnavailableError("refusing to generate text for a password field")
-            context = {
-                "goal": goal,
-                "field": {"label": element.label, "role": element.role_name, "current_value": element.value},
-                "app": obs.app.name,
-                "window": obs.window.title if obs.window else None,
-                "screen_text": obs.text[:4000],
-                "recent_actions": [h.get("action") for h in history[-6:]],
-            }
-            return self.writer.write(context), False, f"model:{self.writer.model}"
-        raise TextUnavailableError("TYPE_TEXT was chosen but no text slot or text model can supply a value")
+            # One composition per field and run: a retry types the same poem instead of writing a new one.
+            key = element.signature
+            if key not in self._generated:
+                context = {
+                    "goal": goal,
+                    "field": {"label": element.label, "role": element.role_name, "current_value": element.value},
+                    "app": obs.app.name,
+                    "window": obs.window.title if obs.window else None,
+                    "screen_text": obs.text[:4000],
+                    "recent_actions": [h.get("action") for h in history[-6:]],
+                }
+                self._generated[key] = self.writer.write(context)
+            return ResolvedText(self._generated[key], False, f"model:{self.writer.model}")
+        raise TextUnavailableError("TYPE_TEXT was chosen but no text slot or writer can supply a value")
 
     def close(self) -> None:
         if self.writer is not None:

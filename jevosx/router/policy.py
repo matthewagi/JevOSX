@@ -18,7 +18,7 @@ from ..types import CLICK, TYPE_TEXT, Observation, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
 from .prompts import MEMORY, NEXT_ACTION, TARGET, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
-from .text import TextSource
+from .text import GENERATE, TextSource
 
 TEXT_SLOT_HEAD = "text_slot"
 CONSOLE_NOTE = (
@@ -242,8 +242,11 @@ def build_state(
     }
     if hints:
         state["memory_hints"] = list(hints)
-    if text_source is not None and text_source.slots:
-        state["text_slots"] = {name: slot.preview for name, slot in text_source.slots.items()}
+    if text_source is not None and (text_source.slots or text_source.generate):
+        slots = {name: slot.preview for name, slot in text_source.slots.items()}
+        if text_source.generate:
+            slots[GENERATE] = "a writer composes the new text the goal asks for, for the field TYPE_TEXT chooses"
+        state["text_slots"] = slots
     return state
 
 

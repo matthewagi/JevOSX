@@ -36,8 +36,8 @@ from ..errors import JevOSXError
 from ..executor.base import DryRunExecutor, Executor
 from ..memory.store import MemoryStore
 from ..router.policy import JevRouter, element_state
-from ..router.text import LLMTextWriter
 from ..types import Action, Observation
+from ..writer import TextWriter, WriterStatus, create_writer
 
 log = logging.getLogger("jevosx.ui")
 STATIC = Path(__file__).with_name("static")
@@ -137,8 +137,9 @@ class Components:
     executor: Executor
     router: JevRouter
     memory: MemoryStore | None
-    text_writer: LLMTextWriter | None
+    text_writer: TextWriter | None
     demo: bool
+    writer_status: WriterStatus | None = None
 
     def close(self) -> None:
         self.router.client.close()
@@ -156,12 +157,14 @@ def build_components(settings: Settings, *, demo: bool) -> Components:
     keys = key_vocabulary(settings.keys.custom, settings.keys.disabled)
     embedder = HashingEmbedder(settings.memory.dim)
     if demo:
+        from ..writer.simulated import SimulatedWriter
         from .demo import DemoDesktop, SimulatedJev
 
         desktop = DemoDesktop()
         router = JevRouter.from_settings(SimulatedJev().client(), settings.jev, keys)
         memory = MemoryStore(":memory:", embedder) if settings.memory.enabled else None
-        return Components(desktop, desktop, router, memory, None, demo=True)
+        status = WriterStatus("simulated", True, "available", "demo writer with canned text")
+        return Components(desktop, desktop, router, memory, SimulatedWriter(), demo=True, writer_status=status)
 
     from ..executor import create_executor
     from ..observer import create_observer
@@ -172,16 +175,8 @@ def build_components(settings: Settings, *, demo: bool) -> Components:
     executor = create_executor(settings.executor, observer.frontmost_pid)
     router = JevRouter.from_settings(JevClient.from_settings(settings.jev), settings.jev, keys)
     memory = MemoryStore(settings.memory_path, embedder) if settings.memory.enabled else None
-    writer = None
-    key = settings.text_model.api_key()
-    if settings.text_model.model and key:
-        writer = LLMTextWriter(
-            base_url=settings.text_model.base_url,
-            api_key=key,
-            model=settings.text_model.model,
-            timeout_s=settings.text_model.timeout_s,
-        )
-    return Components(observer, executor, router, memory, writer, demo=False)
+    writer, status = create_writer(settings, notify=lambda message: log.warning("%s", message))
+    return Components(observer, executor, router, memory, writer, demo=False, writer_status=status)
 
 
 @dataclass
@@ -326,6 +321,11 @@ class RunManager:
             checks.append(
                 {"name": "Jev API key", "ok": has_key, "detail": "set" if has_key else "set TYPESAFE_API_KEY in .env"}
             )
+        writer = self._components.writer_status if self._components is not None else None
+        if writer is not None:
+            # Optional feature: an unavailable writer is shown as neutral (None), not as a failure.
+            detail = writer.detail + (f" → {writer.hint}" if writer.hint and not writer.available else "")
+            checks.append({"name": "Writer", "ok": True if writer.available else None, "detail": detail})
         memory: dict[str, Any] = {"enabled": self.settings.memory.enabled}
         if self._components is not None and self._components.memory is not None:
             stats = self._components.memory.stats()
@@ -635,6 +635,10 @@ def serve(settings: Settings, *, demo: bool, host: str, port: int, open_browser:
         import webbrowser
 
         threading.Timer(0.4, lambda: webbrowser.open(link)).start()
+    if not demo:
+        # Connect to the Mac and prepare the writer (a one-time Swift build) while the page loads, so the first
+        # command does not wait for it. Failures are reported again when a run starts.
+        threading.Thread(target=_warm_up, args=(server.manager,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -642,3 +646,13 @@ def serve(settings: Settings, *, demo: bool, host: str, port: int, open_browser:
     finally:
         server.shutdown()
     return 0
+
+
+def _warm_up(manager: RunManager) -> None:
+    try:
+        components = manager.components()
+    except Exception as exc:  # noqa: BLE001 - only a head start; the first run builds (and reports) again
+        log.info("warm-up skipped: %s", exc)
+        return
+    if components.writer_status is not None:
+        print(f"writer {components.writer_status.describe()}")

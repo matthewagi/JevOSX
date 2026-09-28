@@ -270,6 +270,10 @@ class Action:
     key: KeyBinding | None = None
     text: str | None = None
     text_is_secret: bool = False
+    text_source: str = ""  # slot:<name> | model:<writer>
+    text_label: str | None = None  # shown instead of the text in history and logs (e.g. saved credentials)
+    require_host: str | None = None  # credentials: the web page host that must still be on screen when typing
+    secure_only: bool = False  # a password: may only go into a password field
 
     def describe(self) -> str:
         if self.element is not None:

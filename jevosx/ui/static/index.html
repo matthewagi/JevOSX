@@ -379,7 +379,7 @@ async function refreshStatus() {
     const s = await api("/api/status"); state.status = s;
     $("#mode").textContent = s.demo ? "DEMO" : "LIVE"; $("#mode").className = "mode " + (s.demo ? "demo" : "live");
     const checks = $("#checks"); checks.replaceChildren();
-    for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok ? "ok" : "bad"), title: c.detail }, h("span", { class: "dot" }), c.name));
+    for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok === true ? "ok" : c.ok === false ? "bad" : ""), title: c.detail }, h("span", { class: "dot" }), c.name));
     checks.append(h("span", { class: "pill", title: "decision model" }, h("span", { class: "dot" }), s.model));
     if (s.memory.enabled) checks.append(h("span", { class: "pill ok", title: "local trajectory memory" }, h("span", { class: "dot" }),
       `memory · ${s.memory.episodes ?? 0} runs`));

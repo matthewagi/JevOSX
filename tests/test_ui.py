@@ -10,6 +10,7 @@ from jevosx.memory import MemoryStore
 from jevosx.router.policy import JevRouter
 from jevosx.ui.demo import DemoDesktop, SimulatedJev
 from jevosx.ui.server import Components, EventBus, RunManager, RunOptions, UIServer
+from jevosx.writer.simulated import SimulatedWriter
 
 
 def demo_settings():
@@ -25,7 +26,7 @@ def make_manager():
 
     def builder(settings, demo):
         router = JevRouter.from_settings(SimulatedJev(latency=False).client(), settings.jev, key_vocabulary())
-        return Components(desktop, desktop, router, MemoryStore(":memory:"), None, demo=True)
+        return Components(desktop, desktop, router, MemoryStore(":memory:"), SimulatedWriter(), demo=True)
 
     bus = EventBus()
     return RunManager(demo_settings(), demo=True, bus=bus, builder=builder), desktop, bus
@@ -57,6 +58,15 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
         ("Open Downloads in Finder", lambda d: d.apps["Finder"].folder == "Downloads"),
         ("Open Notes", lambda d: d.front == "Notes"),
         ("look for pictures of flowers red", lambda d: d.apps["Safari"].page == "pictures of flowers red - Search"),
+        (
+            "Open TextEdit and write a poem about the sea",
+            lambda d: d.apps["TextEdit"].body.startswith("A poem about the sea") and d.apps["TextEdit"].document,
+        ),
+        ("write a haiku about rain in Notes", lambda d: d.apps["Notes"].notes[0].startswith("Rain arrives")),
+        (
+            'write a poem about autumn in TextEdit and save it as "autumn"',
+            lambda d: d.apps["TextEdit"].document == "autumn" and "autumn" in d.apps["TextEdit"].body,
+        ),
     ],
 )
 def test_demo_scenarios_complete(goal, check):

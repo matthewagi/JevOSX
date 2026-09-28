@@ -110,9 +110,12 @@ class MacDesktopObserver:
         except StaleElementError:
             return f"{pid}|stale"
 
-    def observe(self) -> Observation:
+    def observe(self, pid: int | None = None) -> Observation:
+        """Observe the frontmost app, or the app with `pid` (e.g. for diagnostics while another app is in front)."""
         started = time.perf_counter()
-        pid, how = self.detect_frontmost()
+        how = "requested"
+        if pid is None:
+            pid, how = self.detect_frontmost()
         if pid is None:
             raise StaleElementError(f"no frontmost application ({how})")
         app = appmod.app_for_pid(pid)

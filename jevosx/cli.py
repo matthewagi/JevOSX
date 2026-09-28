@@ -83,7 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     diagnose = sub.add_parser("diagnose", help="report exactly what the agent can read from the frontmost window")
     diagnose.add_argument("--delay", type=float, default=3.0, help="seconds to switch to the app first (default 3)")
-    diagnose.add_argument("--depth", type=int, default=3, help="raw tree depth to print (default 3)")
+    diagnose.add_argument("--app", help='check this running app directly, e.g. --app "Google Chrome" (no clicking)')
+    diagnose.add_argument("--depth", type=int, default=12, help="raw tree depth to print (default 12)")
     diagnose.set_defaults(handler=cmd_diagnose)
 
     doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
@@ -252,7 +253,7 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
     observer = create_observer(settings.observer)
     require_trusted()
     print(f"jevosx {__version__} diagnose · Python {platform.python_version()} · {platform.platform()}")
-    if args.delay:
+    if args.delay and not args.app:
         print(f"click on the app to check within {args.delay:.0f} s…", flush=True)
         time.sleep(args.delay)
 
@@ -269,6 +270,13 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
 
     (pid, how), ms = timed(observer.detect_frontmost)
     print(f"frontmost: pid {pid} via {how} ({ms:.0f} ms)")
+    if args.app:
+        target = observer.find_app(args.app)
+        if target is None or target.pid is None:
+            print(f"{args.app!r} is not running")
+            return 1
+        pid = target.pid
+        print(f"checking {target.name} (pid {pid}) as requested")
     if pid is None:
         return 1
     app = app_for_pid(pid)
@@ -294,7 +302,7 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
 
     def dump(element: Any, depth: int) -> None:
         nonlocal lines
-        if lines >= 80:
+        if lines >= 150:
             return
         (err, values), ms = timed(lambda: element.read_many(attrs))
         (kerr, kids), kms = timed(lambda: element.read("AXChildren"))
@@ -302,6 +310,9 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
         size = values.get("AXSize")
         size_text = f"{size[0]:.0f}x{size[1]:.0f}" if isinstance(size, tuple) and len(size) == 2 else "?"
         label = clean_text(values.get("AXTitle") or values.get("AXDescription"), 40)
+        if values.get("AXRole") == "AXGroup" and not label and len(kids) == 1 and not err and depth:
+            dump(kids[0], depth)  # unlabeled single-child wrapper: print its content at the same level
+            return
         flags = " hidden" if values.get("AXHidden") else ""
         flags += " disabled" if values.get("AXEnabled") is False else ""
         print(
@@ -315,7 +326,7 @@ def cmd_diagnose(args: argparse.Namespace, settings: Settings) -> int:
 
     dump(window, 0)
     try:
-        obs, ms = timed(observer.observe)
+        obs, ms = timed(partial(observer.observe, pid))
     except JevOSXError as exc:
         print(f"observe failed: {exc}")
         return 1

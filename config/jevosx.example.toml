@@ -1,0 +1,85 @@
+# JevOSX configuration. Copy to ./jevosx.toml or ~/.config/jevosx/config.toml and edit.
+# Every key is optional; the values below are the defaults. Unknown keys are rejected (typos fail loudly).
+# Secrets never go here: put TYPESAFE_API_KEY (and optionally TEXT_MODEL_API_KEY) in the environment or .env.
+
+[jev]
+api_key_env = "TYPESAFE_API_KEY"
+endpoint = "https://api.typesafe.ai/v1/systemone"
+model = "jev-latest"              # pin a version (e.g. "jev-1.13.0") for reproducible runs
+timeout_s = 10.0
+max_retries = 2                    # transient 429/5xx/529 only; decisions have no side effects
+http2 = true
+max_choices = 200                  # per choice question (Jev accepts up to 255)
+# Context guardrails
+max_state_bytes = 48000            # serialized state cap: text is trimmed first, then trailing elements
+include_disabled = false           # send disabled / non-interactive elements too
+offer_installed_apps = "mentioned" # mentioned | all | none: which non-running apps OPEN_APP may offer
+
+[observer]
+max_nodes = 3000                   # AX nodes visited per observation
+max_elements = 180                 # indexed elements per observation
+max_depth = 64
+max_children = 400
+time_budget_s = 1.5
+max_text_chars = 2000              # visible static text sent as context
+probe_generic = true               # index labelled AXGroup/AXImage/AXCell only if they expose AXPress
+include_menus = true               # menu-bar commands as MENU targets
+max_menu_items = 200
+menu_cache_ttl_s = 3.0
+include_installed_apps = true
+app_dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", "~/Applications"]
+messaging_timeout_s = 0.5          # per-AX-call timeout so a hung app cannot stall the agent
+enable_web_accessibility = true    # AXManualAccessibility (Electron) / AXEnhancedUserInterface (Chromium)
+
+[executor]
+typing_mode = "auto"               # auto | ax (AXValue writes) | keys (Unicode keystrokes)
+pointer_fallback = false           # last resort: click the element's own AX frame centre
+settle_timeout_s = 0.8
+settle_poll_s = 0.05
+wait_s = 0.6
+launch_timeout_s = 8.0
+key_delay_s = 0.006
+scroll_page_fraction = 0.8
+
+[memory]
+enabled = true
+path = "~/.jevosx/memory.db"
+dim = 512                          # changing this requires a new database
+max_hints = 4
+top_episodes = 8
+min_goal_similarity = 0.3
+min_state_similarity = 0.35
+store_typed_text = false
+keep_episodes = 5000
+
+[safety]
+confirm_patterns = ['\bdelete\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b']
+deny_apps = ["com.apple.keychainaccess", "com.apple.Passwords"]
+confirm_keys = ["CMD_Q"]
+deny_keys = []
+confirm_all = false
+
+[agent]
+max_steps = 40
+min_confidence = 0.65              # confidence gate: below this, nothing is executed blindly
+low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
+max_low_confidence_retries = 2
+fallback_log = "~/.jevosx/fallbacks.jsonl"
+max_stale_retries = 3
+stuck_after = 3                    # consecutive actions with no visible change → blocked
+history_size = 8
+max_done_rejections = 2
+
+[text_model]
+# Optional OpenAI-compatible model that writes TYPE_TEXT values when no prepared text slot fits.
+# Disabled while `model` is empty. Jev itself never generates text.
+api_key_env = "TEXT_MODEL_API_KEY"
+base_url = "https://openrouter.ai/api/v1"
+model = ""
+timeout_s = 15.0
+
+[keys]
+disabled = []                      # e.g. ["CMD_Q", "CMD_W"]
+
+[keys.custom]
+# SEND_MAIL = "cmd+shift+d"

@@ -1,0 +1,359 @@
+"""Command-line interface: `jevosx run | observe | doctor | memory`."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import platform
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from . import __version__
+from .config import Settings
+from .errors import JevOSXError
+from .types import Action, Observation
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        settings = Settings.load(args.config)
+        return int(args.handler(args, settings) or 0)
+    except JevOSXError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        return 130
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="jevosx", description="Coordinate-free macOS automation driven by Jev.")
+    parser.add_argument("--version", action="version", version=f"jevosx {__version__}")
+    parser.add_argument(
+        "--config", help="path to a TOML config file (default: ./jevosx.toml or ~/.config/jevosx/config.toml)"
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="pursue a goal on this Mac")
+    run.add_argument("goal", help="what to do, e.g. 'Open TextEdit, create a document and type \"hello\"'")
+    run.add_argument("--app", help="open/switch to this app before the first decision")
+    run.add_argument("--slot", action="append", default=[], metavar="NAME=TEXT", help="prepared text for TYPE_TEXT")
+    run.add_argument("--max-steps", type=int, help="step budget (default from config)")
+    run.add_argument("--expect-text", help="only accept DONE when this text is visible on screen")
+    run.add_argument("--dry-run", action="store_true", help="decide but never touch the Mac (implies --max-steps 1)")
+    run.add_argument("--step", action="store_true", help="confirm every action interactively")
+    run.add_argument("--yes", action="store_true", help="auto-approve actions that would need confirmation")
+    run.add_argument("--min-confidence", type=float, help="confidence floor for the gate (default 0.65)")
+    run.add_argument(
+        "--on-low-confidence",
+        choices=["retry", "ask", "stop"],
+        help="fallback when Jev is below the floor: re-observe, ask you, or stop (default from config)",
+    )
+    run.add_argument("--no-memory", action="store_true", help="neither read nor write trajectory memory")
+    run.add_argument("--feedback", action="store_true", help="ask whether the run succeeded and store the label")
+    run.add_argument("--trace", type=Path, help="write step events as JSON lines to this file")
+    run.add_argument("--delay", type=float, default=0.0, help="seconds to wait before starting (switch apps)")
+    run.set_defaults(handler=cmd_run)
+
+    observe = sub.add_parser("observe", help="print the structured text map of the frontmost window")
+    observe.add_argument("--delay", type=float, default=0.0, help="seconds to wait first (switch to the target app)")
+    observe.add_argument("--menus", action="store_true", help="also list menu-bar commands")
+    observe.add_argument("--json", action="store_true", help="print the exact Jev state and questions instead")
+    observe.add_argument("--goal", default="(inspect only)", help="goal to embed in --json questions")
+    observe.set_defaults(handler=cmd_observe)
+
+    doctor = sub.add_parser("doctor", help="check permissions, dependencies and configuration")
+    doctor.add_argument("--live", action="store_true", help="also send one tiny Jev request to measure latency")
+    doctor.set_defaults(handler=cmd_doctor)
+
+    memory = sub.add_parser("memory", help="inspect and manage local trajectory memory")
+    msub = memory.add_subparsers(dest="memory_command", required=True)
+    msub.add_parser("stats", help="counts and database size").set_defaults(handler=cmd_memory)
+    listing = msub.add_parser("list", help="recent episodes")
+    listing.add_argument("-n", type=int, default=20)
+    listing.set_defaults(handler=cmd_memory)
+    show = msub.add_parser("show", help="steps of one episode")
+    show.add_argument("episode", type=int)
+    show.set_defaults(handler=cmd_memory)
+    label = msub.add_parser("label", help="mark an episode as success or failed")
+    label.add_argument("episode", type=int)
+    label.add_argument("status", choices=["success", "failed"])
+    label.set_defaults(handler=cmd_memory)
+    forget = msub.add_parser("forget", help="delete one episode")
+    forget.add_argument("episode", type=int)
+    forget.set_defaults(handler=cmd_memory)
+    prune = msub.add_parser("prune", help="keep only the newest N episodes")
+    prune.add_argument("--keep", type=int, required=True)
+    prune.set_defaults(handler=cmd_memory)
+    export = msub.add_parser("export", help="write trajectories as JSON lines")
+    export.add_argument("path", type=Path)
+    export.set_defaults(handler=cmd_memory)
+    load = msub.add_parser("import", help="load trajectories from JSON lines")
+    load.add_argument("path", type=Path)
+    load.set_defaults(handler=cmd_memory)
+    return parser
+
+
+# ---- run ---------------------------------------------------------------------------------------------------------
+def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
+    from .agent import Agent
+
+    slots = parse_slots(args.slot)
+    interactive = sys.stdin.isatty()
+    if args.step:
+        settings.safety.confirm_all = True
+    if args.min_confidence is not None:
+        settings.agent.min_confidence = args.min_confidence
+    if args.on_low_confidence:
+        settings.agent.low_confidence_policy = args.on_low_confidence
+    settings.validate()
+
+    def confirm(action: Action, reason: str) -> bool:
+        if args.yes:
+            return True
+        if not interactive:
+            return False
+        answer = input(f"  ? {action.describe()}  [{reason}]  allow? [y/N] ").strip().lower()
+        return answer in ("y", "yes")
+
+    verifier = None
+    if args.expect_text:
+        verifier = text_verifier(args.expect_text)
+
+    if args.delay:
+        print(f"starting in {args.delay:.1f}s…")
+        time.sleep(args.delay)
+    agent = Agent.from_settings(settings, dry_run=args.dry_run, use_memory=not args.no_memory, confirm=confirm)
+    max_steps = 1 if args.dry_run and not args.max_steps else args.max_steps
+    trace = args.trace.open("w", encoding="utf-8") if args.trace else None
+    try:
+        with agent:
+            print(f"▶ {args.goal}")
+            for event in agent.iter_run(
+                args.goal, app=args.app, text_slots=slots, max_steps=max_steps, verifier=verifier
+            ):
+                print(format_event(event))
+                if trace:
+                    trace.write(json.dumps(event_json(event), ensure_ascii=False) + "\n")
+            result = agent.last_result
+            assert result is not None
+            print(
+                f"■ {result.status} after {result.steps} step(s) in {result.elapsed_ms / 1000:.1f}s"
+                + (f" · {result.message}" if result.message else "")
+            )
+            if args.feedback and interactive and result.episode_id is not None and agent.memory is not None:
+                answer = input("  did the run achieve the goal? [y/n/skip] ").strip().lower()
+                if answer in ("y", "yes", "n", "no"):
+                    agent.feedback(result.episode_id, answer.startswith("y"))
+                    print("  saved to memory")
+            return 0 if result.ok else 1
+    finally:
+        if trace:
+            trace.close()
+
+
+def parse_slots(values: list[str]) -> dict[str, str]:
+    slots = {}
+    for value in values:
+        name, sep, text = value.partition("=")
+        if not sep or not name.strip():
+            raise JevOSXError(f"--slot expects NAME=TEXT, got {value!r}")
+        slots[name.strip()] = text
+    return slots
+
+
+def text_verifier(expected: str) -> Callable[[Observation], bool]:
+    needle = expected.lower()
+
+    def verify(obs: Observation) -> bool:
+        haystack = [obs.text, obs.window.title if obs.window else ""]
+        haystack += [f"{e.label} {e.value or ''}" for e in obs.elements]
+        return any(needle in (h or "").lower() for h in haystack)
+
+    return verify
+
+
+def format_event(event: Any) -> str:
+    decision = event.decision or {}
+    parts = [f"  {event.step:>2} {event.status:<14} {event.action or ''}"]
+    if decision:
+        parts.append(f"p={decision.get('p_operation', 0):.2f} conf={decision.get('gate_confidence', 0):.2f}")
+    if event.timings:
+        parts.append(" ".join(f"{k[:-3]}={v:.0f}ms" for k, v in event.timings.items()))
+    if event.hints:
+        parts.append(f"{len(event.hints)} memory hint(s)")
+    if event.message:
+        parts.append(event.message)
+    return " · ".join(parts)
+
+
+def event_json(event: Any) -> dict[str, Any]:
+    return {
+        "step": event.step,
+        "status": event.status,
+        "action": event.action,
+        "decision": event.decision,
+        "result": None if event.result is None else vars(event.result),
+        "hints": event.hints,
+        "observation": event.observation,
+        "timings": event.timings,
+        "message": event.message,
+    }
+
+
+# ---- observe -----------------------------------------------------------------------------------------------------
+def cmd_observe(args: argparse.Namespace, settings: Settings) -> int:
+    from .executor.keys import key_vocabulary
+    from .observer import create_observer, render_text_map
+    from .observer.ax import require_trusted
+    from .router.policy import JevRouter, state_size
+    from .router.text import TextSource
+
+    observer = create_observer(settings.observer)
+    require_trusted()
+    if args.delay:
+        time.sleep(args.delay)
+    obs = observer.observe()
+    if not args.json:
+        print(render_text_map(obs, menus=args.menus))
+        return 0
+
+    class _NoClient:
+        model = settings.jev.model
+
+    router = JevRouter.from_settings(
+        _NoClient(),  # type: ignore[arg-type]
+        settings.jev,
+        key_vocabulary(settings.keys.custom, settings.keys.disabled),
+    )
+    text_source = TextSource({})
+    space = router.space(obs, text_source, args.goal)
+    state, questions = router.build_request(args.goal, obs, space, text_source=text_source)
+    payload = {"model": settings.jev.model, "state": state, "questions": questions}
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    print(f"// state {state_size(state)} bytes · {len(questions)} choice questions", file=sys.stderr)
+    return 0
+
+
+# ---- doctor ------------------------------------------------------------------------------------------------------
+def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
+    failures = 0
+
+    def check(ok: bool, label: str, hint: str = "") -> None:
+        nonlocal failures
+        failures += not ok
+        print(f"  {'✓' if ok else '✗'} {label}" + (f"\n      → {hint}" if hint and not ok else ""))
+
+    print(f"jevosx {__version__} · Python {platform.python_version()} · {platform.platform()}")
+    check(sys.platform == "darwin", "running on macOS", "the observer and executor need macOS; tests run anywhere")
+    try:
+        from .observer.ax import AX_AVAILABLE, is_trusted
+
+        check(AX_AVAILABLE, "pyobjc Accessibility bindings", "pip install -r requirements.txt")
+        if AX_AVAILABLE:
+            check(
+                is_trusted(prompt=True),
+                "Accessibility permission",
+                "System Settings › Privacy & Security › Accessibility → enable your terminal/IDE, then restart it",
+            )
+    except JevOSXError as exc:
+        check(False, "Accessibility bindings", str(exc))
+    from .executor.input import QUARTZ_AVAILABLE
+
+    check(QUARTZ_AVAILABLE, "pyobjc Quartz (keyboard events)", "pip install pyobjc-framework-Quartz")
+    key = settings.jev.api_key()
+    check(bool(key), f"{settings.jev.api_key_env} is set", "export TYPESAFE_API_KEY=… or put it in .env")
+    try:
+        import h2  # noqa: F401
+
+        check(True, "HTTP/2 support (h2)")
+    except ImportError:
+        check(False, "HTTP/2 support (h2)", "pip install 'httpx[http2]' (falls back to HTTP/1.1)")
+    try:
+        from .memory.store import MemoryStore
+
+        if settings.memory.enabled:
+            store = MemoryStore(settings.memory_path)
+            stats = store.stats()
+            store.close()
+            check(True, f"memory database {stats['path']} ({stats['episodes']} episodes)")
+    except Exception as exc:  # noqa: BLE001
+        check(False, "memory database", str(exc))
+    if settings.text_model.model:
+        check(
+            bool(settings.text_model.api_key()),
+            f"text model {settings.text_model.model} key",
+            settings.text_model.api_key_env,
+        )
+
+    if args.live and key:
+        from .router.client import JevClient, choice_question
+
+        with JevClient.from_settings(settings.jev) as client:
+            latencies = []
+            try:
+                for _ in range(3):
+                    response = client.evaluate(
+                        {"light": "green"},
+                        {"go": choice_question({"yes": "The light allows driving", "no": "It does not"})},
+                    )
+                    response.choice("go", ["yes", "no"])
+                    latencies.append(response.latency_ms)
+                check(True, f"Jev round trip ({response.model}): " + ", ".join(f"{ms:.0f}ms" for ms in latencies))
+            except JevOSXError as exc:
+                check(False, "Jev round trip", str(exc))
+    print("all checks passed" if not failures else f"{failures} check(s) failed")
+    return 0 if not failures else 1
+
+
+# ---- memory ------------------------------------------------------------------------------------------------------
+def cmd_memory(args: argparse.Namespace, settings: Settings) -> int:
+    from .memory.embedding import HashingEmbedder
+    from .memory.store import MemoryStore
+
+    store = MemoryStore(settings.memory_path, HashingEmbedder(settings.memory.dim))
+    try:
+        command = args.memory_command
+        if command == "stats":
+            print(json.dumps(store.stats(), indent=2))
+        elif command == "list":
+            for episode in store.episodes(args.n):
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(episode.started_at))
+                print(f"  #{episode.id:<5} {when}  {episode.status:<9} {episode.steps:>3} steps  {episode.goal[:80]}")
+        elif command == "show":
+            record = store.episode(args.episode)
+            if record is None:
+                print(f"no episode #{args.episode}")
+                return 1
+            print(f"#{record.id} {record.status} · {record.goal}")
+            for step in store.steps_for([record.id], with_vectors=False):
+                print(f"  {step.idx:>3} {step.operation:<12} {step.target_text or '':<50} {step.outcome}")
+        elif command == "label":
+            store.label_episode(args.episode, args.status)
+            print(f"episode #{args.episode} labelled {args.status}")
+        elif command == "forget":
+            print("deleted" if store.delete_episode(args.episode) else "not found")
+        elif command == "prune":
+            print(f"removed {store.prune(args.keep)} episode(s)")
+        elif command == "export":
+            print(f"exported {store.export_jsonl(args.path)} episode(s) to {args.path}")
+        elif command == "import":
+            print(f"imported {store.import_jsonl(args.path)} episode(s)")
+        return 0
+    finally:
+        store.close()
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

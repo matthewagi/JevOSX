@@ -69,6 +69,7 @@ missing, write: ASK: none"""
 _MULTI_PART = re.compile(r",|;|\bthen\b|\band\b|\bafter(?:wards)?\b|\bnext\b|\bfinally\b", re.IGNORECASE)
 _STEP = re.compile(r"^\s*(?:\d{1,2}\s*[.)]|[-•*])\s*(?P<text>.+?)\s*$")
 _VALUE = re.compile(r"^\s*(?:[-•*]\s*)?(?P<name>[A-Za-z][A-Za-z0-9 _-]{0,30}?)\s*[:=]\s*(?P<value>.+?)\s*$")
+_VALUE_LIKE = re.compile(r"^[a-z][a-z _-]{0,20}:\s")
 _EMPTY = frozenset({"none", "n/a", "na", "-", "nothing", "null", "(none)"})
 MAX_STEPS = 6
 MAX_VALUES = 12
@@ -88,6 +89,8 @@ def parse_plan(text: str) -> list[str]:
         if not match:
             continue
         step = re.sub(r"\s+", " ", match.group("text")).strip(" *_")
+        if _VALUE_LIKE.match(step):
+            continue  # "count: 3" is a value, not a step (seen live in the step list)
         if step and len(step) <= 160 and step.lower() not in (s.lower() for s in steps):
             steps.append(step)
         if len(steps) == MAX_STEPS:

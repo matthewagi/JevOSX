@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..executor.keys import KeyBinding
+from ..images import wants_images
 from ..types import (
     ASK_USER,
     BLOCKED,
@@ -108,7 +109,10 @@ INTENT_APPS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = tuple(
 def intent_apps(goal: str, running: set[str]) -> set[str]:
     """Names of idle apps worth offering for this goal (see INTENT_APPS)."""
     wanted: set[str] = set()
+    pictures = wants_images(goal)
     for pattern, apps in INTENT_APPS:
+        if pictures and apps == ("Finder",):
+            continue  # pictures are saved into their folder directly (SAVE_IMAGE): seen live opening Finder twice
         if pattern.search(goal) and not running & {a.lower() for a in apps}:
             wanted.update(a.lower() for a in apps)
     return wanted

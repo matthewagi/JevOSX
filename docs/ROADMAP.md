@@ -224,6 +224,11 @@ to save and how many before starting.
 - **Taste is not doubt.** Several equally good pictures split Jev's target probability; that choice is not gated
   (the operation still is). Saving is a safe step.
 - Pictures are only offered to runs that save pictures, so other tasks' state does not grow.
+- Seen live (first run, 8 steps, nothing saved): pictures were found and SAVE_IMAGE was offered, but the on-device
+  reader's plan was "1. open Finder · 2. search: dogs · 3. count: 3 …", Finder was offered because the request says
+  "folder", and on Google's picture results Jev followed a link to Unsplash. Now picture goals get a fixed plan
+  (browser → picture_search → SAVE_IMAGE), Finder is not offered for them, "name: value" lines are never plan
+  steps, and on the picture results for the topic the next picture is saved without asking Jev.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

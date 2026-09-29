@@ -39,7 +39,9 @@ from .images import (
     ImageTask,
     display_path,
     file_stem,
+    image_plan,
     image_task,
+    is_results_page,
     search_address,
 )
 from .logins import LoginStore, credential_slots
@@ -48,7 +50,9 @@ from .memory.store import MemoryStore
 from .observer.base import BackgroundObserver, Observer, WindowRef
 from .planner import GoalReading, Planner, merge_slots
 from .risk import CAREFUL, StepRisk, assess, is_sign_in
+from .router.client import ChoiceAnswer
 from .router.policy import Decision, JevRouter, redact
+from .router.space import ActionSpace
 from .router.text import ADDRESS, TextSource, slot_kind, slots_from_goal, template_slots
 from .types import (
     ASK_USER,
@@ -305,6 +309,7 @@ class Agent:
                 slots.pop(name, None)  # settings of the task, not text to type
             if images.topic and not any(slot_kind(n, v) == ADDRESS for n, v in slots.items()):
                 slots["picture_search"] = search_address(images.topic)  # straight to picture results
+            plan = self.last_plan = reading.steps = image_plan(images)
         if self.text_writer is None:
             slots.update(template_slots(goal, slots))  # no model to compose with: plain filler text where asked
         text_source = TextSource(
@@ -406,7 +411,7 @@ class Agent:
                         if hint.target_id is not None:
                             space.annotate(hint.operation, hint.target_id, hint.note())
                 t2 = self.clock()
-                decision = self.router.decide(
+                decision = next_picture(space, obs, images) or self.router.decide(
                     goal,
                     obs,
                     space,
@@ -919,6 +924,20 @@ class Agent:
 
 
 CONSOLE_NAVIGATION = frozenset({PRESS_KEY, MENU, OPEN_APP, FOCUS_WINDOW})
+
+
+def next_picture(space: ActionSpace, obs: Observation, images: ImageTask | None) -> Decision | None:
+    """On the picture results for the topic, every picture fits: the next one is saved without asking Jev. Seen
+    live: on that page Jev followed a link to another site instead of saving."""
+    if images is None or not is_results_page(obs.page_url, images.topic):
+        return None
+    targets = space.targets_for(SAVE_IMAGE)
+    if not targets:
+        return None  # all saved: Jev decides (scroll for more, or another page)
+    first = min(targets.values(), key=lambda t: t.element.index if t.element is not None else 0)
+    certain = ChoiceAnswer(SAVE_IMAGE, {SAVE_IMAGE: 1.0}, 1.0)
+    pick = ChoiceAnswer(first.id, {first.id: 1.0}, 1.0)
+    return Decision(SAVE_IMAGE, certain, target=first, target_answer=pick, model="results page")
 
 
 def without_pictures(obs: Observation) -> None:

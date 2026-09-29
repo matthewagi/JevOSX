@@ -245,3 +245,53 @@ def test_other_runs_do_not_see_pictures(tmp_path):
     state, questions = requests[0]["state"], requests[0]["questions"]
     assert "SAVE_IMAGE" not in questions["operation"]["criteria"] and "image_target" not in questions
     assert [e["label"] for e in state["elements"]] == ["Address and search bar", "Images"]
+
+
+def test_on_the_picture_results_pictures_are_saved_without_asking_jev(tmp_path, monkeypatch):
+    """Seen live: on Google's picture results Jev followed a link to Unsplash instead of saving."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    base = screens()
+
+    def results():
+        obs = base["results"]()
+        obs.page_url = "https://www.google.com/search?q=golden+retrievers&udm=2&sca_esv=abc"
+        return obs
+
+    wander = []
+
+    def jev_wanders(body):
+        wander.append(body)
+        if "SAVE_IMAGE" in body["questions"]["operation"]["criteria"]:
+            return {"operation": "CLICK"}
+        return {"operation": "TYPE_TEXT", "text_slot": "picture_search"}
+
+    desktop = FakeDesktop({"blank": base["blank"], "results": results}, "blank", {("blank", "google.com"): "results"})
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(jev_wanders), keys=key_vocabulary()),
+        settings=settings,
+        image_saver=ImageSaver(client(lambda r: httpx.Response(200, content=PNG))),
+        sleep=lambda _s: None,
+    )
+    result = agent.run(GOAL)
+    assert result.status == "done" and result.steps == 4 and len(wander) == 1  # Jev only opened the results
+    assert len(desktop.executed) == 1
+    assert agent.last_plan[-1].startswith("SAVE_IMAGE one picture per step until 3")
+
+
+def test_results_page_and_value_lines_in_the_plan():
+    from jevosx.images import is_results_page
+    from jevosx.planner import parse_plan
+    from jevosx.router.space import intent_apps
+
+    assert is_results_page("https://www.google.com/search?q=Golden+Retrievers&udm=2", "golden retrievers")
+    assert not is_results_page("https://www.google.com/search?q=golden+retrievers", "golden retrievers")
+    assert not is_results_page("https://www.google.com/search?q=cats&udm=2", "golden retrievers")
+    assert not is_results_page("https://unsplash.com/s/photos/golden-retriever?udm=2", "golden retriever")
+    seen_live = "1. open Finder\n2. search: dogs\n3. count: 3\n4. move: 3\n5. to: Desktop\n6. folder: dogs"
+    assert parse_plan(seen_live) == []  # one real step is no plan
+    assert "finder" not in intent_apps(GOAL, set())
+    assert "finder" in intent_apps("open my downloads folder", set())

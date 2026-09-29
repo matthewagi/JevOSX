@@ -22,7 +22,7 @@ import binascii
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote_plus, unquote, urlsplit
+from urllib.parse import parse_qs, quote_plus, unquote, urlsplit
 
 import httpx
 
@@ -196,6 +196,31 @@ def display_path(path: Path, home: Path | None = None) -> str:
 def search_address(topic: str) -> str:
     """Google's picture results for the topic, so the browser lands on pictures in one step."""
     return f"https://www.google.com/search?q={quote_plus(topic)}&udm=2"
+
+
+def image_plan(task: ImageTask) -> list[str]:
+    """The steps for every picture-saving goal. The on-device reader was seen live writing "1. open Finder ·
+    2. search: dogs · 3. count: 3" for one, and Jev followed it into Finder twice."""
+    return [
+        "Open the web browser",
+        "Type the picture_search address into the browser's address bar",
+        f"SAVE_IMAGE one picture per step until {task.count} are saved (no Finder, menus or dialogs)",
+    ]
+
+
+def is_results_page(url: str | None, topic: str) -> bool:
+    """Google's picture results for this topic (the page picture_search opens): every picture there fits."""
+    if not url or not topic:
+        return False
+    parts = urlsplit(url)
+    host = parts.netloc.lower()
+    if not (host.startswith(("www.google.", "google.")) and parts.path == "/search"):
+        return False
+    query = parse_qs(parts.query)
+    if "2" not in query.get("udm", []) and "isch" not in query.get("tbm", []):
+        return False
+    searched = " ".join(query.get("q", [])).lower()
+    return all(word in searched for word in topic.lower().split())
 
 
 def savable_url(url: str | None) -> bool:

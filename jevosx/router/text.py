@@ -17,7 +17,16 @@ from ..types import Observation, UIElement, clean_text
 from ..writer.base import TextWriter
 from ..writer.openai import LLMTextWriter
 
-__all__ = ["GENERATE", "LLMTextWriter", "ResolvedText", "TextSlot", "TextSource", "slots_from_goal"]
+__all__ = [
+    "GENERATE",
+    "LLMTextWriter",
+    "ResolvedText",
+    "TextSlot",
+    "TextSource",
+    "listing_description",
+    "slots_from_goal",
+    "template_slots",
+]
 
 GENERATE = "GENERATE"
 SECRET_NAME = re.compile(r"secret|password|passcode|passwd|token|\bpin\b|otp", re.IGNORECASE)
@@ -137,6 +146,29 @@ def slots_from_goal(goal: str) -> dict[str, str]:
     if price:
         slots["price"] = price
     return slots
+
+
+# "... for 40 euros generic text": the request wants filler text, not something personal. Without a writer model a
+# plain template stands in, so the listing can still be finished (only when no writer exists, see Agent.iter_run).
+_WANTS_FILLER = re.compile(
+    r"\b(?:generic|some|short|simple|basic|standard|any)\s+(?:text|description|copy|details)\b|\bdescription\b",
+    re.IGNORECASE,
+)
+
+
+def listing_description(title: str) -> str:
+    return (
+        f"{title} in good working order. Works as it should and is ready to use. "
+        "Pick-up or delivery can be arranged; message me with any questions."
+    )
+
+
+def template_slots(goal: str, slots: Mapping[str, str]) -> dict[str, str]:
+    """Filler text for when no writer can compose: a plain listing description for "sell ... generic text"."""
+    title = slots.get("title")
+    if not title or "description" in slots or not (_SELLING.search(goal) and _WANTS_FILLER.search(goal)):
+        return {}
+    return {"description": listing_description(title)}
 
 
 @dataclass(frozen=True, slots=True)

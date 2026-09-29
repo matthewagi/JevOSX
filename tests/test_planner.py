@@ -139,3 +139,27 @@ def test_agent_offers_the_values_the_model_read_from_the_goal():
     assert slots["title"] == "Plastic welding gun" and slots["price"] == "40" and "description" in slots
     assert "password" not in slots and "GENERATE" in slots
     assert "title “Plastic welding gun”" in result.events[0].message and "description (" in result.events[0].message
+
+
+def test_without_a_writer_a_listing_still_gets_plain_filler_text():
+    from jevosx.router.text import template_slots
+
+    field = element(1, "AXTextField", "Description", kind="text_input", ops=("TYPE_TEXT", "CLICK"), in_web_area=True)
+    desktop = FakeDesktop({"form": lambda: observation([field, element(2, "AXButton", "Publish")])}, "form", {})
+    requests: list[dict] = []
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(lambda body: {"operation": "DONE"}, requests), keys=key_vocabulary()),
+        settings=settings,
+        sleep=lambda _s: None,
+    )
+    agent.run(FB_GOAL)
+    slots = requests[0]["state"]["text_slots"]
+    assert slots["title"] == "Plastic welding gun" and slots["price"] == "40"
+    assert slots["description"].startswith("Plastic welding gun in good working order") and "GENERATE" not in slots
+    assert template_slots("sell my bike for 50 euros", {"title": "Bike"}) == {}  # no filler text asked for
+    assert template_slots(FB_GOAL, {"title": "Bike", "description": "mine"}) == {}  # never replaces a real one
+    assert template_slots("write a description of the Eiffel Tower", {}) == {}  # not a listing

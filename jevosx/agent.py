@@ -31,7 +31,7 @@ from .memory.store import MemoryStore
 from .observer.base import Observer
 from .planner import GoalReading, Planner, merge_slots
 from .router.policy import Decision, JevRouter, redact
-from .router.text import TextSource, slots_from_goal
+from .router.text import TextSource, slots_from_goal, template_slots
 from .types import (
     ASK_USER,
     BLOCKED,
@@ -259,8 +259,11 @@ class Agent:
         reading = self.planner.read(goal) if self.planner is not None else GoalReading()
         plan = reading.steps
         self.last_plan = plan
+        slots = merge_slots(reading.values, slots_from_goal(goal))
+        if self.text_writer is None:
+            slots.update(template_slots(goal, slots))  # no model to compose with: plain filler text where asked
         text_source = TextSource(
-            {**merge_slots(reading.values, slots_from_goal(goal)), **(text_slots or {})},
+            {**slots, **(text_slots or {})},
             self.text_writer,
             generate=self.settings.writer.offer == "always" or wants_generation(goal),
         )

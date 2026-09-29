@@ -45,7 +45,7 @@ class SimulatedWriter:
     ) -> str:
         """Stands in for the goal reader: numbered steps, then the values the pattern rules find (plus a description
         when the request asks for new text), in the same format the real model is asked for."""
-        from ..router.text import slots_from_goal
+        from ..router.text import listing_description, slots_from_goal
 
         request = next((line[9:] for line in prompt.splitlines() if line.startswith("Request: ")), prompt)
         parts = [p.strip() for p in re.split(r",\s*|\s+(?:and then|then|and)\s+", request) if p.strip()]
@@ -53,10 +53,7 @@ class SimulatedWriter:
         slots = slots_from_goal(request)
         values = {"website" if name.startswith("url") else name: value for name, value in slots.items()}
         if re.search(r"\b(generic|some|short)\s+text\b|\bdescription\b", request, re.I) and "title" in values:
-            values["description"] = (
-                f"{values['title']} in good working order. Works as it should and is ready to use. "
-                "Pick-up or delivery can be arranged; message me with any questions."
-            )
+            values["description"] = listing_description(values["title"])
         lines += [f"{name}: {value}" for name, value in values.items()] or ["none"]
         return "\n".join(lines)
 

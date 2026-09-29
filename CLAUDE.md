@@ -48,6 +48,9 @@ jevosx ask --wait "go to facebook marketplace and open the create listing page"
 `--wait` prints the steps as they happen and exits 0 when the run is done. Questions ("Before I start") and approvals
 are answered by the person in the console.
 
+When the JevOSX connector is installed (`jevosx mcp --install`), the same is available as tools: `run_task` (with the
+exact text for each field in `texts`), `wait_for_run`, `look_at_screen` and `recent_runs`.
+
 ### Rules while testing
 
 - Never publish, post, send, pay, buy, delete, or sign in to the person's accounts unless the person asks for that

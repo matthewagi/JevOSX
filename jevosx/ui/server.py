@@ -41,7 +41,7 @@ from ..executor.base import DryRunExecutor, Executor
 from ..logins import LoginStore
 from ..memory.store import MemoryStore
 from ..observer.base import BackgroundObserver
-from ..pilot import DemoModel, Pilot, PilotUnavailable, summarize_run
+from ..pilot import DemoModel, Pilot, PilotUnavailable, compact_screen, summarize_run
 from ..planner import Planner
 from ..router.policy import JevRouter, element_state
 from ..types import Action, Observation
@@ -137,6 +137,7 @@ class RunOptions:
             low_confidence_policy=policy,
             slots={k.strip(): v for k, v in slots.items() if k.strip()},
             use_memory=bool(data.get("use_memory", True)),
+            origin="claude" if data.get("origin") == "claude" else "person",
         )
 
 
@@ -344,14 +345,7 @@ class RunManager:
         while self.running:  # Stop was pressed: the run ends after its current step
             time.sleep(0.2)
         run = next((r for r in self.history if r["id"] == run_id), self.current or {"id": run_id})
-        screen = self.look()
-        compact = {k: screen.get(k) for k in ("app", "window", "url") if screen.get(k)}
-        compact["elements"] = [
-            f"[{e['index']}] {e['role']} {e['label']}" + (f" = {e['value']}" if e.get("value") else "")
-            for e in screen.get("elements", [])[:40]
-        ]
-        compact["text"] = str(screen.get("text", ""))[:1200]
-        return summarize_run(run, compact)
+        return summarize_run(run, compact_screen(self.look()))
 
     def recent_runs(self, count: int) -> list[dict[str, Any]]:
         episodes = self.memory(count).get("episodes", [])
@@ -722,6 +716,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send_json(manager.state())
             if url.path == "/api/observe":
                 return self._send_json(manager.observe())
+            if url.path == "/api/look":  # the window the agent works in, not the console in front
+                return self._send_json(manager.look())
             if url.path == "/api/memory":
                 return self._send_json(manager.memory())
         except JevOSXError as exc:

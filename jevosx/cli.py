@@ -85,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     ui.set_defaults(handler=cmd_ui)
 
+    mcp = sub.add_parser("mcp", help="connect the Claude app on this Mac to JevOSX (Model Context Protocol, stdio)")
+    mcp.add_argument("--install", action="store_true", help="add JevOSX to the Claude desktop app and print the rest")
+    mcp.set_defaults(handler=cmd_mcp)
+
     ask = sub.add_parser("ask", help="give the running console a command (for a Siri Shortcut: Hey Siri, Ask JevOSX)")
     ask.add_argument("goal", nargs="+", help="what to do, e.g. sell the welding gun on Marketplace")
     ask.add_argument("--wait", action="store_true", help="print the steps as they happen and wait for the result")
@@ -309,71 +313,54 @@ def cmd_ui(args: argparse.Namespace, settings: Settings) -> int:
     return serve(settings, demo=args.demo, host=args.host, port=args.port, open_browser=not args.no_browser)
 
 
-def _console_call(console: dict[str, Any], path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-    import urllib.request
+def cmd_mcp(args: argparse.Namespace, settings: Settings) -> int:
+    """Serve JevOSX's tools to the Claude app over stdio, or with --install, register it with the Claude apps."""
+    from . import mcp_server
 
-    request = urllib.request.Request(
-        console["url"].rstrip("/") + path,
-        data=None if body is None else json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "X-JevOSX-Token": console["token"]},
-        method="GET" if body is None else "POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        data = json.loads(response.read() or b"{}")
-    return data if isinstance(data, dict) else {}
+    if not args.install:
+        return mcp_server.serve()
+    path = mcp_server.install_desktop()
+    command = " ".join(mcp_server.server_command())
+    print(f"added JevOSX to the Claude desktop app: {path}")
+    print("quit and reopen Claude, then ask it in a chat, for example: use JevOSX to open Notes")
+    print("for Claude Code, run this once:")
+    print(f"  claude mcp add --scope user jevosx -- {command}")
+    return 0
 
 
 def cmd_ask(args: argparse.Namespace, settings: Settings) -> int:
     """Start a run in the console that is already open (`jevosx ui`), which then talks it through with you. With
     --wait, print its steps as they happen and exit with its outcome (0 when done)."""
-    import urllib.error
-
-    from .ui.server import console_file
+    from .console_client import ConsoleClient, ConsoleNotRunning
 
     goal = " ".join(args.goal).strip()
     try:
-        console = json.loads(console_file().read_text(encoding="utf-8"))
-        run_id = _console_call(console, "/api/run", {"goal": goal}).get("run_id")
-        print(f"started: {goal}", flush=True)
-        if args.wait:
-            return _follow(console, str(run_id or ""), args.timeout)
-    except FileNotFoundError:
-        print("the console is not running: start it with jevosx ui", file=sys.stderr)
+        console = ConsoleClient.find()
+        run_id = console.start_run(goal)
+    except ConsoleNotRunning as exc:
+        print(str(exc), file=sys.stderr)
         return 2
-    except urllib.error.HTTPError as exc:
-        detail = json.loads(exc.read() or b"{}").get("error", exc.reason)
-        print(f"the console refused: {detail}", file=sys.stderr)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
-    except (OSError, ValueError, KeyError) as exc:
-        print(f"cannot reach the console ({exc}): is jevosx ui still running?", file=sys.stderr)
-        return 2
-    return 0
+    print(f"started: {goal}", flush=True)
+    if not args.wait:
+        return 0
 
+    def event(e: dict[str, Any]) -> None:
+        message = f" · {e['message']}" if e.get("message") else ""
+        print(f"  {e.get('step')} {e.get('status')} {e.get('action') or ''}{message}", flush=True)
 
-def _follow(console: dict[str, Any], run_id: str, timeout_s: float) -> int:
-    """Print a console run's steps and questions as they happen; the outcome decides the exit code."""
-    shown, asked = 0, set()
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        state = _console_call(console, "/api/state")
-        run = state.get("current") or {}
-        if run.get("id") != run_id:
-            run = next((r for r in state.get("history", []) if r.get("id") == run_id), run)
-        for event in run.get("events", [])[shown:]:
-            message = f" · {event['message']}" if event.get("message") else ""
-            print(f"  {event.get('step')} {event.get('status')} {event.get('action') or ''}{message}", flush=True)
-        shown = len(run.get("events", []))
-        for pending in state.get("pending_approvals", []):
-            if pending["request_id"] not in asked:
-                asked.add(pending["request_id"])
-                print(f"  … waiting for you in the console: {pending['action']} ({pending['reason']})", flush=True)
-        if run.get("result") is not None:
-            result = run["result"]
-            print(f"{result.get('status')} after {result.get('steps')} step(s) {result.get('message') or ''}".rstrip())
-            return 0 if result.get("status") in ("done", "success") else 1
-        time.sleep(0.5)
-    print("still running; stopped waiting (the run goes on in the console)", file=sys.stderr)
-    return 3
+    def pending(p: dict[str, Any]) -> None:
+        print(f"  … waiting for you in the console: {p['action']} ({p['reason']})", flush=True)
+
+    run = console.follow(run_id, args.timeout, on_event=event, on_pending=pending)
+    result = run.get("result")
+    if result is None:
+        print("still running; stopped waiting (the run goes on in the console)", file=sys.stderr)
+        return 3
+    print(f"{result.get('status')} after {result.get('steps')} step(s) {result.get('message') or ''}".rstrip())
+    return 0 if result.get("status") in ("done", "success") else 1
 
 
 # ---- diagnose ----------------------------------------------------------------------------------------------------
@@ -632,6 +619,16 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     print(f"  {'✓' if settings.pilot.enabled and has_key else '–'} Claude in the console: {pilot_state}")
     if settings.pilot.enabled and not has_key:
         print("      → optional: add ANTHROPIC_API_KEY=... to ~/JevOSX/.env to talk to Claude in jevosx ui")
+    # Optional: the Claude app on this Mac drives JevOSX from its own chat (no API key), through jevosx mcp.
+    from .mcp_server import desktop_config_path
+
+    try:
+        connected = "jevosx" in json.loads(Path(desktop_config_path()).read_text()).get("mcpServers", {})
+    except (OSError, ValueError, AttributeError):
+        connected = False
+    print(f"  {'✓' if connected else '–'} Claude app connector: {'installed' if connected else 'not installed'}")
+    if not connected:
+        print("      → optional: jevosx mcp --install lets the Claude app chat drive JevOSX (no API key)")
     if settings.observer.vision != "off" and sys.platform == "darwin":
         from .observer.vision import screen_recording_allowed
 

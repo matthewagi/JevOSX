@@ -407,9 +407,33 @@ Without a model, simple patterns take over: sites named without ".com" ("go to f
 quoted text, URLs and the phrase after "search for". Passwords are never read from a request; they come only from
 the Keychain.
 
-### Claude in the console
+### Driving JevOSX from the Claude app (no API key)
 
-Switch the composer from **Jev** to **Claude** and talk (or type) to Claude instead of giving JevOSX commands. Claude
+Talk to Claude in the Claude app on your Mac, the way you chat with it anyway, and let it drive the Mac through
+JevOSX. It uses your Claude plan; no API key is involved.
+
+```bash
+jevosx mcp --install
+```
+
+This adds JevOSX to the Claude desktop app's connectors (`~/Library/Application Support/Claude/
+claude_desktop_config.json`, keeping a `.bak` of the old file) and prints the one command that adds it to Claude Code.
+Quit and reopen Claude, then ask in a chat, for example "use JevOSX to open the Marketplace create-listing page and
+fill in the title and price". Claude gets four tools:
+
+- `run_task`: one concrete task with the exact text for each field. It runs in the JevOSX console (started for you if
+  it is not open), where you see every step and answer its questions and approvals. Claude cannot approve anything.
+- `wait_for_run`: keeps following a task that was still going (for example while it waits for you).
+- `look_at_screen`: the element table and text of the window JevOSX works in.
+- `recent_runs`: the last runs and how they ended.
+
+Jev still makes every click and keystroke behind the confidence gate and the safety policy. `jevosx doctor` shows
+whether the connector is installed.
+
+### Claude in the console (API key)
+
+With an Anthropic API key the console can talk to Claude itself (the switch appears once the key is set). Switch the
+composer from **Jev** to **Claude** and talk (or type) to Claude instead of giving JevOSX commands. Claude
 works out what you want, asks for what only you know, and hands JevOSX one concrete task at a time ("open
 facebook.com/marketplace/create/item in Chrome", "type the price 40 into the Price field"). Each task appears as a
 normal run card, with its approvals and questions for you. Afterwards Claude reads how the run ended, looks at the

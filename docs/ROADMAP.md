@@ -193,6 +193,17 @@ Asked for: talk to Claude, which goes in, tries things and sees how JevOSX react
   the run's text slots, so JevOSX never has to cut the words to type out of a sentence. Passwords are refused.
 - Next: a screenshot of the work window for Claude, for pages the accessibility tree describes poorly.
 
+## Phase 9: the Claude app drives JevOSX (done)
+
+Asked for: not through the API, in the chat. The Claude app on the Mac gets JevOSX as a connector (`jevosx mcp`, the
+Model Context Protocol over stdio), so the conversation is the person's own Claude chat on their plan.
+
+- Tools: `run_task` (through the open console, started if needed, with exact texts), `wait_for_run`,
+  `look_at_screen` (the agent's work window, not the console in front) and `recent_runs`.
+- Every task is a normal console run ("Claude → JevOSX: …"); questions and approvals stay with the person there.
+- `jevosx mcp --install` writes the Claude desktop app's connector entry (with a backup) and prints the Claude Code
+  command. The console's own Claude switch only shows once an API key is set.
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

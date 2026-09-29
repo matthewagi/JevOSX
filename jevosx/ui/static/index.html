@@ -424,8 +424,12 @@ async function refreshStatus() {
     const checks = $("#checks"); checks.replaceChildren();
     for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok === true ? "ok" : c.ok === false ? "bad" : ""), title: c.detail }, h("span", { class: "dot" }), c.name));
     checks.append(h("span", { class: "pill", title: "decision model" }, h("span", { class: "dot" }), s.model));
-    if (s.pilot) checks.append(h("span", { class: "pill " + (s.pilot.available === true ? "ok" : s.pilot.available === false ? "bad" : ""),
-      title: `Claude: ${s.pilot.detail}` }, h("span", { class: "dot" }), "Claude"));
+    // Claude in the console needs an Anthropic API key; without one the switch stays hidden (use the Claude app
+    // with jevosx mcp instead).
+    const pilotReady = Boolean(s.pilot && s.pilot.available === true);
+    $("#who").classList.toggle("hidden", !pilotReady);
+    if (!pilotReady && state.who === "claude") claude.setWho("jev");
+    if (pilotReady) checks.append(h("span", { class: "pill ok", title: `Claude: ${s.pilot.detail}` }, h("span", { class: "dot" }), "Claude"));
     if (s.memory.enabled) checks.append(h("span", { class: "pill ok", title: "local trajectory memory" }, h("span", { class: "dot" }),
       `memory · ${s.memory.episodes ?? 0} runs`));
     if (s.stale && !state.staleShown) {

@@ -403,6 +403,21 @@ def _friendly(exc: Exception) -> str:
     return f"{type(exc).__name__}: {clean_text(str(exc), 200)}"
 
 
+def compact_screen(screen: Mapping[str, Any]) -> dict[str, Any]:
+    """The console's observation, cut to what a model needs: where it is, the elements as one line each, some text."""
+    app = screen.get("app")
+    out: dict[str, Any] = {"app": app.get("name") if isinstance(app, Mapping) else app}
+    out.update({k: screen[k] for k in ("window", "url") if screen.get(k)})
+    out["elements"] = [
+        f"[{e['index']}] {e['role']} {e['label']}" + (f" = {e['value']}" if e.get("value") else "")
+        for e in screen.get("elements", [])[:60]
+    ]
+    out["text"] = str(screen.get("text", ""))[:1500]
+    if screen.get("message"):
+        out["note"] = screen["message"]
+    return out
+
+
 def summarize_run(run: Mapping[str, Any], screen: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """What Claude needs from a finished JevOSX run: how it ended, the steps, what it asked, and the screen after."""
     result = run.get("result") or {}

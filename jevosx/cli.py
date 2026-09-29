@@ -55,7 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="decide but never touch the Mac (implies --max-steps 1)")
     run.add_argument("--step", action="store_true", help="confirm every action interactively")
     run.add_argument("--yes", action="store_true", help="auto-approve actions that would need confirmation")
-    run.add_argument("--min-confidence", type=float, help="confidence floor for the gate (default 0.65)")
+    run.add_argument(
+        "--min-confidence",
+        type=float,
+        help="confidence floor for consequential steps (default 0.65); easier steps need less, never more",
+    )
     run.add_argument(
         "--on-low-confidence",
         choices=["retry", "ask", "stop"],
@@ -626,6 +630,8 @@ def cmd_report(args: argparse.Namespace, settings: Settings) -> int:
                     f"  withheld {record['ts'][11:19]} {decision.get('operation')} {decision.get('target') or ''}"
                     f" conf={record.get('confidence')} (floor {record.get('floor')}) in {record.get('window')!r}"
                 )
+                if record.get("risk"):
+                    print(f"         {record['risk']} · {record.get('resolution')}")
                 print(f"         top: {decision.get('top_operations')} · targets: {decision.get('top_targets')}")
                 if "offered" in record:
                     print(f"         offered: {record['offered']} · focused: {record.get('focused')}")

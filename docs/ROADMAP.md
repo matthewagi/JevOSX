@@ -131,6 +131,20 @@ went to the console instead of the new Facebook window. The run failed and kept 
   events (`CGEventPostToPid`, unreliable in Chromium), and AppleScript navigation for browsers (`set URL of active
   tab`, which needs the Automation permission).
 
+## Phase 6: confidence that fits the step (done)
+
+Seen live: one 0.65 floor for every step meant the console asked about opening a browser window, focusing the
+address bar and typing "facebook.com" (0.43 to 0.63), as often as about publishing. Jev's confidence on a routine
+step is often split between equally good routes (Cmd-L, or a click on the address bar), which is not doubt about
+the outcome.
+
+- **Risk tiers** (`jevosx/risk.py`). Safe steps (easily undone) need 0.35, routine clicks and Return 0.5, and
+  consequential steps (the safety policy's confirm list, close, quit) keep 0.65 and are still confirmed.
+- **Remembered steps.** A step that matches one that worked in a similar earlier run counts as safe, so approving
+  it once teaches the agent. Careful steps are always asked about.
+- **One question per step.** Approving an unsure consequential click also answers the safety confirmation.
+- Next: calibrate the tiers from the fallback log (how often an approved step was right) instead of fixed numbers.
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

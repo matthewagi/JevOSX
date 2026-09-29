@@ -69,7 +69,9 @@ confirm_credentials = true         # ask before typing a saved password
 
 [agent]
 max_steps = 40
-min_confidence = 0.65              # confidence gate: below this, nothing is executed blindly
+min_confidence = 0.65              # confidence gate for consequential steps (Publish, Send, Delete, close, quit)
+routine_confidence = 0.5           # clicks on buttons and links, Return, menu commands, DONE
+safe_confidence = 0.35             # easily undone: new window or tab, switch apps, scroll, type into a field
 low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
 console_low_confidence_policy = "ask"  # the web console's default: you approve unsure steps instead of re-asking
 max_low_confidence_retries = 2

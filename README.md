@@ -199,11 +199,25 @@ over exactly the offered ids, and the choice must be the argmax. A malformed ans
 
 The walk itself is bounded by node count, element count, depth, children per node and wall time.
 
-**Confidence gate and fallback.** `agent.min_confidence` (default **0.65**) is compared against the *weakest*
-confidence among the answers that would drive execution: operation, chosen target, and text slot. `DONE` is gated
-too, so an unsure `DONE` cannot end a run early. One exception: while the web console's own browser window is in front, the
-agent may only open a new window or tab, or switch apps or windows. Those moves change nothing, so they are not gated by
-default (`agent.gate_console_navigation = true` gates them too). Below the floor, `LowConfidenceError` is raised and
+**Confidence gate and fallback.** Each step's floor is compared against the *weakest* confidence among the
+answers that would drive execution: operation, chosen target, and text slot. How high the floor is depends on what
+a wrong step would cost (`jevosx/risk.py`):
+
+| Tier | Steps | Floor |
+| --- | --- | --- |
+| safe | open or switch apps and windows, new window or tab, scroll, put the cursor in a field, type into a single-line or empty field, navigation keys (`CMD_L`, `TAB`, arrows…), hand a step to you | `agent.safe_confidence`, **0.35** |
+| routine | clicks on buttons, links and checkboxes, `RETURN`, menu commands, replacing text that is already there, `DONE` | `agent.routine_confidence`, **0.5** |
+| careful | anything the safety policy wants confirmed (Delete, Send, Publish, Pay…), `CMD_W`, `CMD_Q` | `agent.min_confidence`, **0.65** |
+
+No tier's floor is ever above `agent.min_confidence`, so raising it (the console's *Confidence floor*, or
+`--min-confidence`) makes every step more careful. A step that matches one that worked in a similar earlier run
+(a memory hint) counts as safe, unless it is careful: a step you approved once is not asked about again. `DONE`
+is gated too, so an unsure `DONE` cannot end a run early. When you approve an unsure step, a consequential click is
+not asked about a second time, but typing still is.
+
+One exception: while the web console's own browser window is in front, the agent may only open a new window or
+tab, or switch apps or windows. Those moves change nothing, so they are not gated by default
+(`agent.gate_console_navigation = true` gates them too). Below the floor, `LowConfidenceError` is raised and
 handled:
 
 | `agent.low_confidence_policy` | Behaviour |
@@ -213,7 +227,7 @@ handled:
 | `stop` | end the run immediately with status `low_confidence` |
 
 Every withheld decision is appended to `agent.fallback_log` (`~/.jevosx/fallbacks.jsonl`) with the goal, app,
-window, top options, confidence, floor and resolution. You can also pass your own handler:
+window, top options, confidence, floor, risk tier and resolution. You can also pass your own handler:
 `Agent(..., on_low_confidence=lambda exc, obs: "retry" | "execute" | "stop")`.
 
 **Safety and freshness.**
@@ -225,8 +239,8 @@ window, top options, confidence, floor and resolution. You can also pass your ow
   executor re-reads the field's page URL. Saved passwords never reach Jev, the writer, memory, logs or history,
   and usernames are masked in all of them.
 - The Apple menu is never offered.
-- Right before execution the target is re-validated (same frontmost app, same role, still enabled). A stale target
-  is re-observed, never guessed.
+- Right before execution the target is re-validated (same role, still enabled). A stale target is re-observed,
+  never guessed. Key presses are only sent once the work window is confirmed in front.
 - Three consecutive actions with no visible change stop the run as `blocked`.
 - A verifier (`--expect-text`) can reject a premature `DONE`.
 - `--dry-run` decides without touching the Mac.

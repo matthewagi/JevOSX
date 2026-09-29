@@ -54,11 +54,13 @@ class RouterContractError(JevOSXError):
 class LowConfidenceError(JevOSXError):
     """Jev's confidence is below the configured floor. The decision is withheld; the fallback policy decides next."""
 
-    def __init__(self, decision: object, confidence: float, floor: float):
+    def __init__(self, decision: object, confidence: float, floor: float, tier: str = ""):
         self.decision = decision
         self.confidence = confidence
         self.floor = floor
-        super().__init__(f"confidence {confidence:.2f} is below the floor {floor:.2f}; action withheld")
+        self.tier = tier
+        kind = f" for {tier} steps" if tier else ""
+        super().__init__(f"confidence {confidence:.2f} is below the floor {floor:.2f}{kind}; action withheld")
 
 
 class TextUnavailableError(JevOSXError):

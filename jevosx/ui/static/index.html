@@ -281,7 +281,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
         <label class="field">Start in app<input type="text" id="opt-app" placeholder="e.g. TextEdit"></label>
         <label class="field">Only accept DONE if visible<input type="text" id="opt-expect" placeholder="text that proves success"></label>
         <label class="field">Max steps<input type="number" id="opt-steps" min="1" max="200" placeholder="default"></label>
-        <div class="field">Confidence floor <span id="opt-floor-v" class="mono"></span><input type="range" id="opt-floor" min="0" max="1" step="0.05"></div>
+        <div class="field" title="For consequential steps. Easily undone steps (new window, typing an address) need less, clicks a little less; never more than this.">Confidence floor <span id="opt-floor-v" class="mono"></span><input type="range" id="opt-floor" min="0" max="1" step="0.05"></div>
         <div class="field">When Jev is unsure
           <div class="seg" id="opt-policy"><button type="button" data-v="retry">Retry</button><button type="button" data-v="ask">Ask me</button><button type="button" data-v="stop">Stop</button></div>
         </div>
@@ -428,10 +428,11 @@ function runCard(run) {
 function hideWelcome() { $("#welcome")?.remove(); }
 function scrollFeed() { const f = $("#feed"); if (f.scrollHeight - f.scrollTop - f.clientHeight < 260) f.scrollTop = f.scrollHeight; }
 
-function meter(value, floor) {
+function meter(value, floor, risk) {
   const v = Math.max(0, Math.min(1, value ?? 0));
   const cls = v < floor ? "low" : v < floor + 0.1 ? "mid" : "";
-  return h("div", { class: "conf", title: `gate confidence ${v.toFixed(2)} · floor ${floor.toFixed(2)}` },
+  const kind = risk ? ` for ${risk} steps` : "";
+  return h("div", { class: "conf", title: `gate confidence ${v.toFixed(2)} · floor ${floor.toFixed(2)}${kind}` },
     h("div", { class: "meter " + cls }, h("i", { style: `width:${v * 100}%` }), h("span", { class: "floor", style: `left:${floor * 100}%` })),
     h("span", {}, v.toFixed(2)));
 }
@@ -466,7 +467,7 @@ function addStep(entry, ev) {
     h("span", { class: "num", title: retry ? `step ${ev.step}, another attempt` : `step ${ev.step}` }, retry ? "↻" : String(ev.step)),
     h("div", { class: "line" }, h("span", { class: "op", style: `--op: var(${OP_COLOR[op] || "--accent"})` }, op),
       target ? h("span", { class: "target" }, target) : null, h("span", { class: "outcome " + outcomeCls }, "· " + outcome)),
-    d.gate_confidence !== undefined ? meter(d.gate_confidence, entry.floor) : h("span"),
+    d.gate_confidence !== undefined ? meter(d.gate_confidence, d.floor ?? entry.floor, d.risk) : h("span"),
     meta, details);
   entry.steps.append(li);
   scrollFeed();

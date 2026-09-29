@@ -146,6 +146,10 @@ class AgentSettings:
     # Confidence gate: an action (or DONE) is only executed when Jev's confidence for the operation AND for the
     # chosen target are at least this floor. Otherwise the fallback policy runs and nothing is executed blindly.
     min_confidence: float = 0.65
+    # Steps that are easily undone need less (see jevosx/risk.py): opening windows, switching apps, scrolling,
+    # typing into a field (safe), and clicks, Return, menu commands, DONE (routine). Never above min_confidence.
+    safe_confidence: float = 0.35
+    routine_confidence: float = 0.5
     low_confidence_policy: str = "retry"  # retry (re-observe) | ask (human approves) | stop
     # In the web console someone is watching, so an unsure step is shown for approval instead of re-asked.
     console_low_confidence_policy: str = "ask"
@@ -280,8 +284,9 @@ class Settings:
         for name, (value, allowed) in choices.items():
             if value not in allowed:
                 raise ConfigError(f"{name} must be one of {', '.join(allowed)} (got {value!r})")
-        if not 0.0 <= self.agent.min_confidence <= 1.0:
-            raise ConfigError("agent.min_confidence must be between 0 and 1")
+        for name in ("min_confidence", "safe_confidence", "routine_confidence"):
+            if not 0.0 <= getattr(self.agent, name) <= 1.0:
+                raise ConfigError(f"agent.{name} must be between 0 and 1")
         if not 2 <= self.jev.max_choices <= 255:
             raise ConfigError("jev.max_choices must be between 2 and 255")
 

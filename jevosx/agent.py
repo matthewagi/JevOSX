@@ -35,6 +35,7 @@ from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import BackgroundObserver, Observer, WindowRef
 from .planner import GoalReading, Planner, merge_slots
+from .risk import CAREFUL, StepRisk, assess
 from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal, template_slots
 from .types import (
@@ -69,14 +70,16 @@ FALLBACK_RESOLUTIONS = frozenset({"retry", "execute", "stop"})
 
 @dataclass(frozen=True)
 class ConfidenceGate:
-    """Raises LowConfidenceError when the weakest answer that would drive execution is below `floor`."""
+    """Raises LowConfidenceError when the weakest answer that would drive execution is below the floor: the step's
+    own floor from its risk tier (see jevosx/risk.py), or `floor` when none is given."""
 
     floor: float
 
-    def check(self, decision: Decision) -> None:
+    def check(self, decision: Decision, risk: StepRisk | None = None) -> None:
         confidence = decision.gate_confidence
-        if confidence < self.floor:
-            raise LowConfidenceError(decision, confidence, self.floor)
+        floor = risk.floor if risk is not None else self.floor
+        if confidence < floor:
+            raise LowConfidenceError(decision, confidence, floor, risk.tier if risk is not None else "")
 
 
 @dataclass
@@ -383,17 +386,30 @@ class Agent:
                     yield emit(event)
                     break
 
-                # Confidence gate: nothing (not even DONE) is acted on below the floor. WAIT is harmless.
+                # Confidence gate: nothing (not even DONE) is acted on below its floor. WAIT is harmless.
+                person_approved = False
                 if op != WAIT and self._console_navigation(decision, obs):
                     event.message = (
                         f"moving away from the console (confidence {decision.gate_confidence:.2f}; not gated)"
                     )
                 elif op != WAIT:
+                    risk = assess(
+                        self._preview_action(decision),
+                        obs,
+                        settings=cfg,
+                        safety=self.safety,
+                        hints=hints,
+                        target_id=decision.target.id if decision.target else None,
+                    )
+                    if event.decision is not None:
+                        event.decision.update(risk=risk.tier, floor=risk.floor, risk_reason=risk.reason)
                     try:
-                        self.gate.check(decision)
+                        self.gate.check(decision, risk)
                         low_confidence = 0
                     except LowConfidenceError as exc:
-                        resolution = self._handle_low_confidence(exc, goal, obs)
+                        resolution = self._handle_low_confidence(exc, goal, obs, risk)
+                        by_person = self.on_low_confidence is None and cfg.low_confidence_policy == "ask"
+                        person_approved = resolution == "execute" and by_person
                         event.message = f"{exc} → {resolution}"
                         if resolution == "stop":
                             event.status = "low_confidence"
@@ -406,7 +422,7 @@ class Agent:
                             yield emit(event)
                             if low_confidence > cfg.max_low_confidence_retries:
                                 status = "low_confidence"
-                                message = f"Jev stayed below the {self.gate.floor:.2f} confidence floor"
+                                message = f"Jev stayed below the {exc.floor:.2f} confidence floor"
                                 message += _typing_tip(text_source)
                                 break
                             self.sleep(self.settings.executor.wait_s)
@@ -477,8 +493,12 @@ class Agent:
                 verdict = self.safety.check(
                     action, obs.app, window_title=obs.window.title if obs.window else None, page_url=obs.page_url
                 )
+                # A step you just approved is not asked about again, unless it types text you have not seen yet.
+                asked_already = person_approved and action.operation != TYPE_TEXT
                 if verdict.verdict == "deny" or (
-                    verdict.verdict == "confirm" and not (self.confirm and self.confirm(action, verdict.reason))
+                    verdict.verdict == "confirm"
+                    and not asked_already
+                    and not (self.confirm and self.confirm(action, verdict.reason))
                 ):
                     steps += 1
                     outcome = "refused by safety policy" if verdict.verdict == "deny" else "declined by the user"
@@ -572,7 +592,9 @@ class Agent:
     def _mask(self, value: T) -> T:
         return redact(value, self._sensitive) if self._sensitive else value
 
-    def _handle_low_confidence(self, exc: LowConfidenceError, goal: str, obs: Observation) -> str:
+    def _handle_low_confidence(
+        self, exc: LowConfidenceError, goal: str, obs: Observation, risk: StepRisk | None = None
+    ) -> str:
         """Fallback for a withheld decision: custom handler, else the configured policy. Always logged."""
         policy = self.settings.agent.low_confidence_policy
         decision: Decision = exc.decision  # type: ignore[assignment]
@@ -580,7 +602,8 @@ class Agent:
             resolution = self.on_low_confidence(exc, obs)
         elif policy == "ask":
             preview = self._preview_action(decision)
-            approved = self.confirm is not None and self.confirm(preview, str(exc))
+            why = str(exc) + (f" ({risk.reason})" if risk is not None and risk.tier == CAREFUL else "")
+            approved = self.confirm is not None and self.confirm(preview, why)
             resolution = "execute" if approved else "retry"
         else:
             resolution = policy
@@ -596,6 +619,7 @@ class Agent:
                 "decision": self._mask(decision.summary()),
                 "confidence": round(exc.confidence, 4),
                 "floor": exc.floor,
+                "risk": risk.describe() if risk is not None else None,
                 "policy": policy,
                 "resolution": resolution,
                 "offered": list(decision.operation_answer.probabilities),

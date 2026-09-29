@@ -9,7 +9,7 @@ from jevosx.config import AgentSettings, Settings
 from jevosx.executor.keys import key_vocabulary
 from jevosx.executor.safety import SafetyPolicy
 from jevosx.memory.retriever import Hint
-from jevosx.risk import CAREFUL, ROUTINE, SAFE, assess, floors
+from jevosx.risk import CAREFUL, ROUTINE, SAFE, assess, floors, is_one_tap_sign_in
 from jevosx.router.policy import JevRouter
 from jevosx.types import (
     ASK_USER,
@@ -182,3 +182,54 @@ def test_a_second_sign_in_attempt_asks_first():
     agent.run("sign in", text_slots={"password": "hunter2"}, max_steps=4)
     clicks = [a for a in desktop.executed if a.startswith("CLICK")]
     assert len(clicks) == 1 and len(asked) == 1 and "locked" in asked[0]  # the first attempt ran, the second asked
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Continue Matthew Agius", True),  # Facebook's picker, seen live
+        ("Continue as Anna", True),
+        ("Continue with Google", True),
+        ("Continue", False),
+        ("Continue shopping", False),
+        ("Continue reading", False),
+    ],
+)
+def test_an_account_picker_is_a_sign_in(label, expected):
+    assert is_one_tap_sign_in(Action(CLICK, element=element(7, "AXButton", label))) is expected
+
+
+def test_a_one_tap_sign_in_asks_unless_the_task_is_to_sign_in():
+    picker = Action(CLICK, element=element(7, "AXButton", "Continue Matthew Agius"))
+    obs = observation([], app=CHROME, window="Facebook - Google Chrome")
+
+    def risk(goal):
+        return assess(picker, obs, settings=AgentSettings(), safety=SafetyPolicy(), goal=goal)
+
+    unasked = risk("go to facebook marketplace and search for cordless drill")
+    assert unasked.tier == CAREFUL and unasked.confirm and "did not ask" in unasked.reason
+    assert not risk("log in to facebook").confirm
+
+
+def test_a_run_does_not_sign_in_through_an_account_picker(tmp_path):
+    picker = element(1, "AXButton", "Continue Matthew Agius")
+    screens = {"wall": lambda: observation([picker, reload], app=CHROME, window="Facebook - Google Chrome")}
+    desktop = FakeDesktop(screens, "wall", {})
+
+    def answer(body):
+        return {"operation": ("CLICK", 0.95), "click_target": (find_id(body, "click_target", "Continue"), 0.95)}
+
+    asked: list[str] = []
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    settings.agent.stuck_after = 10
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(answer), keys=KEYS),
+        settings=settings,
+        confirm=lambda action, reason: asked.append(reason) or False,
+        sleep=lambda _s: None,
+    )
+    agent.run("go to facebook marketplace and search for cordless drill", max_steps=2)
+    assert desktop.executed == [] and asked and "did not ask" in asked[0]

@@ -547,6 +547,7 @@ class Agent:
                         hints=hints,
                         target_id=decision.target.id if decision.target else None,
                         sign_ins=sign_ins,
+                        goal=goal,
                     )
                     if event.decision is not None:
                         event.decision.update(risk=risk.tier, floor=risk.floor, risk_reason=risk.reason)

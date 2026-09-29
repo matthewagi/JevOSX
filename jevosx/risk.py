@@ -9,7 +9,9 @@ Steps are sorted into three tiers instead:
 - routine: clicks on buttons, links and checkboxes, Return, menu commands, replacing text that is already there,
   DONE.
 - careful: what the safety policy wants confirmed (Delete, Send, Publish, Pay…) and keys that close or quit, and
-  a second sign-in attempt in a run: failed logins can lock an account, so that one always asks the person.
+  a second sign-in attempt in a run: failed logins can lock an account, so that one always asks the person. So does
+  a one-tap sign-in ("Continue as Anna", "Continue with Google") when the task did not ask to sign in: it needs no
+  password, so nothing else stops the agent from walking into the person's account on its way somewhere else.
 
 Each tier has its own floor (agent.safe_confidence, agent.routine_confidence, agent.min_confidence), never above
 agent.min_confidence, so raising the floor still makes every step more careful. A step that matches one that worked
@@ -57,6 +59,12 @@ SAFE_CLICK_ROLES = frozenset(
 )  # fmt: skip
 REMEMBERED_SCORE = 0.6  # how similar an earlier run must be for its step to count as remembered
 SIGN_IN = re.compile(r"\b(?:log ?in|sign ?in|log on)\b", re.IGNORECASE)
+GOAL_SIGN_IN = re.compile(r"\b(?:log|sign)(?: me)? ?(?:in|on)\b", re.IGNORECASE)
+# An account picker's button: "Continue as Anna", "Continue Anna Borg" (Facebook), "Continue with Google".
+ONE_TAP_SIGN_IN = re.compile(
+    r"^continue (?:as \S.*|with (?:google|apple|facebook|microsoft)\b.*|(?-i:[A-Z][\w'’.-]*(?: [A-Z][\w'’.-]*)+))$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +92,15 @@ def assess(
     hints: Sequence[Hint] = (),
     target_id: str | None = None,
     sign_ins: int = 0,
+    goal: str = "",
 ) -> StepRisk:
     """The tier and floor for a decided step (`action` is its preview: no text resolved yet). `sign_ins` counts the
     sign-in attempts already made in this run with a typed password."""
     if sign_ins and is_sign_in(action, obs):
         why = "another sign-in attempt: if the password is wrong again, the account could be locked"
+        return StepRisk(CAREFUL, floors(settings)[CAREFUL], why, confirm=True)
+    if is_one_tap_sign_in(action) and not GOAL_SIGN_IN.search(goal):
+        why = "signs in to your account, and the task did not ask to sign in"
         return StepRisk(CAREFUL, floors(settings)[CAREFUL], why, confirm=True)
     tier, reason = _tier(action, obs, safety)
     if tier != CAREFUL and _remembered(action.operation, target_id, hints):
@@ -149,6 +161,13 @@ def is_sign_in(action: Action, obs: Observation) -> bool:
         focused = obs.focused_element
         return focused is not None and focused.secure
     return False
+
+
+def is_one_tap_sign_in(action: Action) -> bool:
+    """A click on an account picker, which signs in without a password."""
+    if action.operation != CLICK or action.element is None:
+        return False
+    return bool(ONE_TAP_SIGN_IN.match(" ".join((action.element.label or "").split())))
 
 
 def _remembered(operation: str, target_id: str | None, hints: Sequence[Hint]) -> bool:

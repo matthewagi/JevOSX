@@ -304,6 +304,14 @@ to save and how many before starting.
   exactly when the one read-back happened. The read-back now polls (`settle_poll_s`) for up to `settle_timeout_s`.
   The same probe found that reading a text range (AXSelectedTextRange) crashed, because PyObjC returned a plain
   tuple; nothing read ranges yet, and it is fixed.
+- Seen live ("go to facebook marketplace and search for cordless drill", 16:04): Chrome was logged out of Facebook,
+  and after "Allow all cookies" Jev clicked Facebook's account picker, "Continue Matthew Agius", four times (conf
+  0.61, then 0.35–0.45). It led only to the password page, and nothing was typed, but a picker signs in without a
+  password when the session is still valid. Only a second attempt with a typed password was careful. A one-tap
+  sign-in ("Continue <Name>", "Continue as …", "Continue with Google/Apple/…") is now careful and always asks the
+  person, unless the goal itself asks to sign in or log in; with nobody at the terminal the run declines it. The
+  reader's plan for that goal was also wrong ("click buy it now · send message · send"); Send was never reached,
+  and would have asked.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

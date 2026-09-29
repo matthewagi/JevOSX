@@ -494,3 +494,23 @@ def test_a_press_reported_as_an_error_fails_when_nothing_changed(tmp_path):
         first = store.steps_for([result.episode_id], with_vectors=False)[0]
     assert first.outcome == "failed"
     assert "failed: perform AXPress failed with AXError -25205" in json.dumps(requests[1]["state"])
+
+
+def test_a_goal_to_write_is_not_done_before_anything_was_typed(tmp_path):
+    """Seen live: "write a shopping list" in Notes ended DONE right after OPEN_APP, on the list an earlier run wrote."""
+    earlier = observation(
+        [element(1, "AXTextArea", "Body", value="milk eggs bread", kind="text_input", ops=("TYPE_TEXT", "CLICK"))],
+        text="milk eggs bread",
+    )
+    desktop = FakeDesktop({"note": lambda: earlier}, "note", {})
+
+    def done_unless_told(body):
+        rejected = "nothing written yet" in json.dumps(body["state"]["recent_actions"])
+        typed = "TYPE_TEXT" in json.dumps(body["state"]["recent_actions"])
+        return {"operation": "TYPE_TEXT"} if rejected and not typed else {"operation": "DONE"}
+
+    agent, _, _ = make_agent(tmp_path, done_unless_told, desktop=desktop)
+    with agent:
+        result = agent.run("write a shopping list: milk, eggs, bread", text_slots={"list": "milk, eggs, bread"})
+    assert [e.status for e in result.events] == ["failed", "acted", "done"] and result.status == "done"
+    assert len(desktop.executed) == 1 and desktop.executed[0].startswith("TYPE_TEXT")

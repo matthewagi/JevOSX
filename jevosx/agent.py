@@ -359,6 +359,7 @@ class Agent:
         page_reads = 0
         launching: tuple[AppInfo, _Pending] | None = None  # an app asked to come forward, not in front yet
         launch_reads = 0
+        asks_writing, typed_any = wants_generation(goal), False  # a goal to write text is not done before typing
 
         def emit(event: StepEvent) -> StepEvent:
             events.append(event)
@@ -613,6 +614,18 @@ class Agent:
                         break
                     page_reads = PAGE_READS
                     continue
+                if op == DONE and asks_writing and not typed_any:
+                    # Seen live: "write a shopping list" in Notes ended DONE right after OPEN_APP, because the list an
+                    # earlier run had written was open (and memory said that run finished there).
+                    done_rejections += 1
+                    steps += 1
+                    history.append({"step": steps, "action": "DONE", "result": "rejected: nothing written yet"})
+                    event.status, event.message = "failed", "DONE rejected: nothing has been written in this run yet"
+                    yield emit(event)
+                    if done_rejections > cfg.max_done_rejections:
+                        status, message = "failed", "Jev said DONE before writing anything"
+                        break
+                    continue
                 if op == DONE:
                     if verifier is not None and not verifier(obs):
                         done_rejections += 1
@@ -749,6 +762,7 @@ class Agent:
                     launching, launch_reads = (action.app, waiting), LAUNCH_READS
                 elif result.unconfirmed:
                     pending = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
+                typed_any = typed_any or (result.ok and op == TYPE_TEXT)
                 if result.ok and op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app):
                     navigation, page_reads = page_where(obs), PAGE_READS
                 event.status = "acted" if result.ok else "failed"

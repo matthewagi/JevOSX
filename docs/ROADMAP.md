@@ -272,6 +272,10 @@ to save and how many before starting.
   "New Note" reported AXError -25205 although it had created the note. A timed-out launch or activation is now
   "unconfirmed": the agent waits for the app (up to 10 × 1 s) instead of asking Jev, and a press answered with
   -25205 counts as done when the next read shows the UI changed.
+- Seen live (the Notes retry after that fix, 14:04): DONE at confidence 0.92 straight after OPEN_APP, twice,
+  because the list the 12:37 run had written was open and memory said that run finished there. A goal that asks for
+  text to be written ("write a …", see `wants_generation`) is now not accepted as DONE before a TYPE_TEXT in the
+  same run has succeeded.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

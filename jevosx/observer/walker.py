@@ -380,8 +380,11 @@ class TreeWalker:
                         text_chars += len(text) + 1
 
             owner = frame.owner
-            # A link card on a web page (a picture search result) is opened to find the picture inside it.
-            card = role == "AXLink" and frame.in_web and rect is not None and min(rect.w, rect.h) >= MIN_SIDE
+            # A link or button card on a web page (a picture search result) is opened to find the picture inside
+            # it. Seen live: Google's picture results are buttons, and none of their pictures were offered.
+            card = (
+                role in ("AXLink", "AXButton") and frame.in_web and rect is not None and min(rect.w, rect.h) >= MIN_SIDE
+            )
             if element is not None:
                 if len(elements) >= limits.max_elements:
                     if not truncated:

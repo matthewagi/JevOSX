@@ -522,6 +522,17 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
                     continue
 
+                if op == DONE and images is not None and not images.complete:
+                    # Seen live: Jev said DONE (confidence 0.36) with 2 of 3 pictures saved.
+                    done_rejections += 1
+                    steps += 1
+                    history.append({"step": steps, "action": "DONE", "result": f"rejected: {images.progress()}"})
+                    event.status, event.message = "failed", f"DONE rejected: {images.progress()}"
+                    yield emit(event)
+                    if done_rejections > cfg.max_done_rejections:
+                        status, message = "failed", f"stopped early: {images.progress()}"
+                        break
+                    continue
                 if op == DONE:
                     if verifier is not None and not verifier(obs):
                         done_rejections += 1

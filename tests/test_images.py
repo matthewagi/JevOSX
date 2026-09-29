@@ -338,3 +338,40 @@ def test_keeps_saving_from_a_page_it_chose_and_scrolls_for_more(tmp_path, monkey
     assert result.status == "done" and len(asked) == 1  # Jev chose the first picture; the rest followed
     assert [e.split(" [")[0] for e in desktop.executed] == ["SCROLL_DOWN"]
     assert len(list((tmp_path / "Desktop" / "dogs").iterdir())) == 3
+
+
+def test_done_is_not_accepted_before_enough_pictures_are_saved(tmp_path, monkeypatch):
+    """Seen live: Jev said DONE with 2 of 3 pictures saved, and the run ended as done."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    desktop = FakeDesktop({"results": screens()["results"]}, "results", {})
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(lambda body: {"operation": "DONE"}), keys=key_vocabulary()),
+        settings=settings,
+        image_saver=ImageSaver(client(lambda r: httpx.Response(200, content=PNG))),
+        sleep=lambda _s: None,
+    )
+    result = agent.run(GOAL, max_steps=10)
+    assert result.status == "failed" and "saved 0 of 3" in result.message
+
+
+def test_pictures_inside_web_buttons_are_offered():
+    """Seen live: Google's picture results are buttons wrapping the thumbnail."""
+    web = FakeNode(
+        "AXWebArea",
+        frame=(0, 0, 800, 600),
+        children=[
+            FakeNode(
+                "AXButton",
+                Title="500+ Golden Retriever Pictures",
+                frame=(10, 10, 200, 180),
+                children=[FakeNode("AXImage", URL="https://encrypted-tbn0.gstatic.com/x", frame=(10, 10, 200, 150))],
+            )
+        ],
+    )
+    root = FakeNode("AXWindow", Title="golden retrievers - Google Search", frame=(0, 0, 800, 600), children=[web])
+    result = TreeWalker().walk([(root, None)])
+    assert [e.kind for e in result.elements] == ["control", "image"]

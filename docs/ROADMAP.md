@@ -287,6 +287,9 @@ to save and how many before starting.
 - Seen live (paris2, 14:21): still 330 by 550, because the picture came through Google's results, whose link
   (imgres) for a Wikipedia picture is Wikimedia's thumbnail. The original found behind a Google tile now goes
   through the same mapping.
+- Seen live (paris2 retry, 14:23): still 330 by 550. In Google's preview the Wikipedia picture's address is
+  thumb.wikimedia.org/…/330px-…?utm_source=…, not upload.wikimedia.org, so the mapping never matched. Both hosts are
+  now read, and the original is fetched from upload.wikimedia.org (4.3 MB for that picture, under the cap).
 - Seen live (14:12): the on-device reader's plan for a Notes task was "open Finder · open Applications · open Notes"
   (and "open Finder" for photos before). When a plan step opens an app the goal names, steps that open Finder, the
   Applications folder, Launchpad, Spotlight or the Dock are dropped (OPEN_APP launches the app directly), unless the

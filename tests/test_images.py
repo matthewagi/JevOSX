@@ -594,6 +594,10 @@ def test_wikimedia_original_strips_thumb_and_the_size():
     assert wikimedia_original(
         "https://upload.wikimedia.org/wikipedia/en/thumb/0/0b/Gozo%20sunset.JPEG/lossy-page1-1280px-Gozo%20sunset.JPEG"
     ) == ("https://upload.wikimedia.org/wikipedia/en/0/0b/Gozo%20sunset.JPEG")
+    assert wikimedia_original(  # seen live in Google's preview
+        "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/85/Tour_Eiffel_%28cropped%29.jpg/"
+        "330px-Tour_Eiffel_%28cropped%29.jpg?utm_source=en.wikipedia.org&utm_campaign=parser"
+    ) == ("https://upload.wikimedia.org/wikipedia/commons/8/85/Tour_Eiffel_%28cropped%29.jpg")
     assert wikimedia_original("https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel.jpg") is None  # original
     assert (
         wikimedia_original(  # a drawing's thumbnail is the picture: the original is an SVG

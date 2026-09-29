@@ -260,14 +260,18 @@ _WIKIMEDIA_KEEPS = (".jpg", ".jpeg", ".png", ".gif", ".webp")  # not .svg, .pdf 
 def wikimedia_original(url: str | None) -> str | None:
     """The original file behind a Wikimedia thumbnail: upload.wikimedia.org/wikipedia/commons/thumb/a/a8/X.jpg/
     330px-X.jpg → upload.wikimedia.org/wikipedia/commons/a/a8/X.jpg. None for any other address. Seen live: a
-    picture saved from Wikipedia was its 330 by 550 thumbnail."""
+    picture saved from Wikipedia was its 330 by 550 thumbnail, served from thumb.wikimedia.org with a ?utm_source
+    query when it came through Google's preview."""
     parts = urlsplit(url or "")
-    if parts.netloc.lower() != "upload.wikimedia.org" or parts.scheme not in ("http", "https"):
+    if parts.netloc.lower() not in ("upload.wikimedia.org", "thumb.wikimedia.org") or parts.scheme not in (
+        "http",
+        "https",
+    ):
         return None
     match = _WIKIMEDIA_THUMB.fullmatch(parts.path)
     if not match or not unquote(match.group("name")).lower().endswith(_WIKIMEDIA_KEEPS):
         return None
-    return f"{parts.scheme}://{parts.netloc}{match.group('base')}/{match.group('file')}"
+    return f"https://upload.wikimedia.org{match.group('base')}/{match.group('file')}"
 
 
 def imgres_target(url: str | None) -> str | None:

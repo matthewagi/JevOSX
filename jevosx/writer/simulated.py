@@ -52,8 +52,6 @@ class SimulatedWriter:
         lines = ["STEPS:", *(f"{i}. {part[0].upper()}{part[1:]}" for i, part in enumerate(parts, start=1)), "VALUES:"]
         slots = slots_from_goal(request)
         values = {"website" if name.startswith("url") else name: value for name, value in slots.items()}
-        if "item_name" in values:
-            values["title"] = values.pop("item_name").capitalize()
         if re.search(r"\b(generic|some|short)\s+text\b|\bdescription\b", request, re.I) and "title" in values:
             values["description"] = (
                 f"{values['title']} in good working order. Works as it should and is ready to use. "

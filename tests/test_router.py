@@ -238,10 +238,10 @@ def test_idle_apps_that_fit_the_goal_are_offered_without_being_named():
     [
         (
             FB_GOAL,
-            {"url_1": "facebook.com/marketplace/create/item", "item_name": "plastic welding gun", "price": "40"},
+            {"url_1": "facebook.com/marketplace/create/item", "title": "Plastic welding gun", "price": "40"},
         ),
         ("open youtube and play some jazz", {"url_1": "youtube.com"}),
-        ("sell my old bike for €120 on ebay", {"url_1": "ebay.com", "item_name": "old bike", "price": "120"}),
+        ("sell my old bike for €120 on ebay", {"url_1": "ebay.com", "title": "Old bike", "price": "120"}),
         ("wait for 5 minutes then open notes", {}),  # a bare number is only a price when selling
     ],
 )

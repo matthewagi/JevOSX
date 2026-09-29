@@ -114,7 +114,7 @@ def test_reading_tolerates_missing_headers_and_empty_values():
 
 def test_model_values_come_first_and_patterns_fill_gaps():
     model = {"title": "Plastic welding gun", "price": "40"}
-    patterns = {"item_name": "plastic welding gun", "price": "41", "url_1": "facebook.com"}
+    patterns = {"title": "Plastic welding gun", "price": "41", "url_1": "facebook.com"}
     assert merge_slots(model, patterns) == {"title": "Plastic welding gun", "price": "40", "url_1": "facebook.com"}
 
 

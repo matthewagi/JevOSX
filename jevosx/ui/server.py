@@ -487,6 +487,15 @@ def observation_json(obs: Observation) -> dict[str, Any]:
 
 
 # ---- HTTP ---------------------------------------------------------------------------------------------------------
+class _QuietServer(ThreadingHTTPServer):
+    """A browser closing a connection (reload, event-stream reconnect) is normal, not an error to print."""
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        if isinstance(sys.exc_info()[1], ConnectionError | TimeoutError):
+            return
+        super().handle_error(request, client_address)
+
+
 class UIServer:
     def __init__(
         self,
@@ -506,7 +515,7 @@ class UIServer:
         class Handler(_Handler):
             ui = server
 
-        self.httpd = ThreadingHTTPServer((host, port), Handler)
+        self.httpd = _QuietServer((host, port), Handler)
         self.httpd.daemon_threads = True
         address = self.httpd.server_address
         self.host, self.port = str(address[0]), int(address[1])

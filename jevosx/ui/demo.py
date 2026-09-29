@@ -830,7 +830,7 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         offered = questions.get("text_slot", {}).get("criteria", {})
         fields = questions.get("type_text_target")
         if "title" in by_label:
-            wanted_slots = {"title": ("title", "item_name"), "price": ("price",), "description": ("description",)}
+            wanted_slots = {"title": ("title",), "price": ("price",), "description": ("description",)}
             for label, slot_names in wanted_slots.items():
                 if by_label[label].get("value") or TYPE_TEXT not in ops:
                     continue

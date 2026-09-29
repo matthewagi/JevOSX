@@ -107,8 +107,8 @@ def slots_from_goal(goal: str) -> dict[str, str]:
       → {"phrase_1": "pictures of red flowers"}
     - URLs and domains: "go to apple.com" → {"url_1": "apple.com"}; well-known sites: "go to facebook" →
       {"url_1": "facebook.com"}
-    - an item and its price: "sell a plastic welding gun for 40 euros" → {"item_name": "plastic welding gun",
-      "price": "40"}
+    - an item and its price: "sell a plastic welding gun for 40 euros" → {"title": "Plastic welding gun",
+      "price": "40"} (named after the "Title" field that listing forms use)
     """
     quoted = [next(g for g in match.groups() if g is not None) for match in _QUOTED.finditer(goal)]
     slots = {f"quote_{i}": value for i, value in enumerate(dict.fromkeys(quoted), start=1)}
@@ -133,7 +133,7 @@ def slots_from_goal(goal: str) -> dict[str, str]:
         slots[f"url_{i}"] = value
     item, price = _item_and_price(unquoted)
     if item:
-        slots["item_name"] = item
+        slots["title"] = item[:1].upper() + item[1:]
     if price:
         slots["price"] = price
     return slots

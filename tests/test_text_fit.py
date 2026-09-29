@@ -230,6 +230,66 @@ def test_typed_text_is_found_in_the_field_that_replaced_the_observed_one(monkeyp
     assert result.ok is ok
 
 
+@pytest.mark.parametrize(
+    ("old", "now", "typed", "kept"),
+    [
+        ("mitre saw", "mitre sawcordless drill", "cordless drill", True),
+        ("mitre saw", "cordless drillmitre saw", "cordless drill", True),
+        ("mitre saw", "cordless drill", "cordless drill", False),
+        ("", "cordless drill", "cordless drill", False),
+        ("dri", "drill", "drill", False),
+        ("google.com/search?q=gun", "facebook.com/", "facebook.com", False),
+    ],
+)
+def test_text_typed_next_to_the_old_value_is_told_apart(old, now, typed, kept):
+    from jevosx.executor.mac import kept_old_text
+
+    assert kept_old_text(old, now, typed) is kept
+
+
+@pytest.mark.parametrize("second_try_takes", [True, False])
+def test_old_text_that_survives_select_all_is_cleared_and_retyped(monkeypatch, second_try_takes):
+    """Seen live: Facebook's "Search Marketplace" still held "mitre saw", Cmd-A did not take, and the search became
+    "mitre sawcordless drill" while the read-back (the typed text is in the field) passed."""
+    from jevosx.config import ExecutorSettings
+    from jevosx.executor import input as keyboard
+    from jevosx.executor.mac import MacExecutor
+
+    class Box:
+        value, selected, tries = "mitre saw", False, 0
+
+        def set(self, attribute: str, value: Any) -> None:
+            pass
+
+        def get(self, attribute: str, default: Any = None) -> Any:
+            return self.value if attribute == "AXValue" else default
+
+    box = Box()
+
+    def chord(parsed: Any, delay_s: float = 0) -> None:
+        if parsed.key == "delete" and box.selected:
+            box.value = ""
+        # The first select-all is lost to the re-render; the second one takes only when the test says so.
+        box.selected = box.tries >= 1 and second_try_takes
+
+    def type_text(text: str, delay_s: float = 0) -> None:
+        box.value = text if box.selected else box.value + text
+        box.tries += 1
+
+    monkeypatch.setattr(keyboard, "post_chord", chord)
+    monkeypatch.setattr(keyboard, "type_text", type_text)
+    executor = object.__new__(MacExecutor)
+    executor.settings = ExecutorSettings(settle_timeout_s=0.05, settle_poll_s=0.001)
+    executor._frontmost_pid = lambda: 300
+    combobox = element(
+        40, "AXComboBox", "Search Marketplace", kind="text_input", ops=("TYPE_TEXT",), in_web_area=True, node=box,
+        value="mitre saw",
+    )  # fmt: skip
+    result = executor.execute(Action(TYPE_TEXT, element=combobox, text="cordless drill"), observation([], app=CHROME))
+    assert result.ok is second_try_takes
+    assert box.value == ("cordless drill" if second_try_takes else "mitre sawcordless drillcordless drill")
+
+
 def test_a_browser_window_offers_one_address_bar():
     shown = address_bar(value="google.com/search?q=plastic+welding+gun")
     edited = address_bar(value="plastic welding gun", focused=True)

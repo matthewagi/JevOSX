@@ -357,6 +357,11 @@ of 24 cards; a cap of 80 cut drills and grinders short; and far down, results st
   scrolls, when the page cannot scroll further, at `--max` (500), or, with `--query`, when fewer than a quarter of the
   latest 20 results mention the query.
 - `--out results.json`, `--photos folder/` (downloads each picture), and a price summary (ask prices left out).
+- Seen live (29 Sep, before collecting "cordless drill"): Jev went to an open Facebook window whose "Search
+  Marketplace" still held "mitre saw". Cmd-A did not take (focusing the box opens its suggestions and re-renders it),
+  the search became "mitre sawcordless drill", and the read-back passed because the new text was in the field.
+  Typing now checks that the old value is gone: if the typed text sits next to it, the executor selects all, deletes
+  and types once more, and reports a failure if the old text still survives (`kept_old_text`).
 
 ## Next research (not built yet)
 

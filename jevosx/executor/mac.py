@@ -45,6 +45,16 @@ from .keys import KeyChord
 PRESS_ACTIONS = ("AXPress", "AXConfirm", "AXPick", "AXOpen")
 
 
+def kept_old_text(old: str | None, now: str, typed: str) -> bool:
+    """The typed text landed next to the field's old value instead of replacing it: "mitre saw" + "cordless drill" →
+    "mitre sawcordless drill". An old value that is part of the typed text (typing "drill" over "dri"), or a field that
+    simply holds the typed text plus an inline completion ("facebook.com/"), does not count."""
+    old, typed = (old or "").strip(), typed.strip()
+    if not old or not typed or old in typed or now.strip() == typed:
+        return False
+    return old in now and typed in now and now.replace(typed, "", 1).strip().startswith(old)
+
+
 class FocusLost(Exception):
     """The observed window could not be made the key window, so keys or pointer clicks would land elsewhere."""
 
@@ -251,7 +261,27 @@ class MacExecutor:
             return ActionResult(True, "keystrokes", "secure field: value not read back")
         if text.strip() and not self._text_appears(node, text.strip(), element, obs.app.pid):
             return ActionResult(False, "keystrokes", "typed text did not appear in the field")
+        if element.value and kept_old_text(element.value, self._value(node), text):
+            # Seen live: Facebook's "Search Marketplace" still held "mitre saw" from an earlier run, Cmd-A did not take
+            # (focusing opens its suggestions and re-renders the box), and the search became "mitre sawcordless drill".
+            # The read-back above passed because the new text was in there. Clear the field once more and retype.
+            time.sleep(self.settings.settle_poll_s)
+            self._try_set(node, "AXFocused", True)
+            keyboard.post_chord(KeyChord.parse("cmd+a"), delay_s=self.settings.key_delay_s)
+            keyboard.post_chord(KeyChord.parse("delete"), delay_s=self.settings.key_delay_s)
+            keyboard.type_text(text, delay_s=self.settings.key_delay_s)
+            self._text_appears(node, text.strip(), element, obs.app.pid)
+            if kept_old_text(element.value, self._value(node), text):
+                return ActionResult(False, "keystrokes", f"the field kept its old text {element.value!r}")
+            return ActionResult(True, "keystrokes", "retyped after the old text survived select-all")
         return ActionResult(True, "keystrokes")
+
+    @staticmethod
+    def _value(node: Any) -> str:
+        try:
+            return str(node.get("AXValue") or "")
+        except (AXError, StaleElementError):
+            return ""
 
     def _text_appears(self, node: Any, text: str, element: UIElement, pid: int | None) -> bool:
         """Wait for posted keystrokes to show up in the field's AXValue. Key events are delivered asynchronously: seen

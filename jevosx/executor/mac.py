@@ -98,6 +98,10 @@ class MacExecutor:
                         action.element, action.text, obs, secret=action.text_is_secret, prefer_keys=keys
                     )
                     if result.ok and action.submit:  # the window is still in front from typing
+                        # Seen live: "facebook.com" + Return opened facebook.com/marketplace/create/item, Chrome's
+                        # inline completion from earlier visits, selected after the typed text. Forward Delete
+                        # removes a selected completion and does nothing at the end of plain text.
+                        keyboard.post_chord(KeyChord.parse("forwarddelete"), delay_s=self.settings.key_delay_s)
                         keyboard.post_chord(KeyChord.parse("return"), delay_s=self.settings.key_delay_s)
                         result = ActionResult(True, result.method, "typed and pressed Return")
             elif op == MENU and action.element is not None:

@@ -312,6 +312,12 @@ to save and how many before starting.
   person, unless the goal itself asks to sign in or log in; with nobody at the terminal the run declines it. The
   reader's plan for that goal was also wrong ("click buy it now · send message · send"); Send was never reached,
   and would have asked.
+- Seen live ("go to facebook marketplace and search for angle grinder", 16:09): the url_1 slot was "facebook.com",
+  but typing it and pressing Return opened facebook.com/marketplace/create/item, the create-listing form. Chrome
+  had completed the address inline from earlier listing runs, selected after the typed text, and Return accepted
+  the completion. The read-back did not notice, because the field did contain the typed text. The agent then kept
+  wanting to retype the same address (conf 0.06–0.16) and stopped. Forward Delete now goes before Return: it removes
+  a selected completion and does nothing at the end of plain text.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

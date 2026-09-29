@@ -148,7 +148,49 @@ def test_the_mac_executor_presses_return_after_an_address(monkeypatch):
     obs = observation([], app=CHROME)
     bar = address_bar(node=node)
     result = executor.execute(Action(TYPE_TEXT, element=bar, text="facebook.com", submit=True), obs)
-    assert result.ok and result.detail == "typed and pressed Return" and sent == ["cmd+a", "facebook.com", "return"]
+    assert result.ok and result.detail == "typed and pressed Return"
+    assert sent == ["cmd+a", "facebook.com", "forwarddelete", "return"]
+
+
+def test_an_address_is_opened_without_chrome_s_inline_completion(monkeypatch):
+    """Seen live: "facebook.com" + Return opened the completion Chrome had selected after it, the create-listing
+    page from earlier runs. Forward Delete drops the selected completion before Return."""
+    from jevosx.config import ExecutorSettings
+    from jevosx.executor import input as keyboard
+    from jevosx.executor.mac import MacExecutor
+
+    class Bar:
+        def __init__(self) -> None:
+            self.typed = ""
+            self.completion = ""
+
+        def set(self, attribute: str, value: Any) -> None:
+            pass
+
+        def get(self, attribute: str, default: Any = None) -> Any:
+            return self.typed + self.completion if attribute == "AXValue" else default
+
+    node = Bar()
+    opened: list[str] = []
+
+    def chord(chord: Any, delay_s: float = 0) -> None:
+        if str(chord) == "forwarddelete":
+            node.completion = ""
+        elif str(chord) == "return":
+            opened.append(node.typed + node.completion)
+
+    def type_text(text: str, delay_s: float = 0) -> None:
+        node.typed, node.completion = text, "/marketplace/create/item"
+
+    monkeypatch.setattr(keyboard, "post_chord", chord)
+    monkeypatch.setattr(keyboard, "type_text", type_text)
+    executor = object.__new__(MacExecutor)
+    executor.settings = ExecutorSettings()
+    executor._frontmost_pid = lambda: 300
+    executor.execute(
+        Action(TYPE_TEXT, element=address_bar(node=node), text="facebook.com", submit=True), observation([], app=CHROME)
+    )
+    assert opened == ["facebook.com"]
 
 
 def test_a_browser_window_offers_one_address_bar():

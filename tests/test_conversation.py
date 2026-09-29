@@ -199,3 +199,11 @@ def test_the_console_takes_answers_to_questions_over_http(console):
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 def test_console_file_is_private(console):
     assert console_file().stat().st_mode & 0o077 == 0
+
+
+def test_ask_can_wait_and_print_the_steps(console, capsys):
+    from jevosx.cli import main
+
+    assert main(["ask", "--wait", "Open", "Notes"]) == 0
+    out = capsys.readouterr().out
+    assert "started: Open Notes" in out and "OPEN_APP Notes" in out and "done after" in out

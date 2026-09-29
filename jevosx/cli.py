@@ -87,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     ask = sub.add_parser("ask", help="give the running console a command (for a Siri Shortcut: Hey Siri, Ask JevOSX)")
     ask.add_argument("goal", nargs="+", help="what to do, e.g. sell the welding gun on Marketplace")
+    ask.add_argument("--wait", action="store_true", help="print the steps as they happen and wait for the result")
+    ask.add_argument("--timeout", type=float, default=600.0, help="with --wait: give up waiting after this many s")
     ask.set_defaults(handler=cmd_ask)
 
     diagnose = sub.add_parser("diagnose", help="report exactly what the agent can read from the frontmost window")
@@ -307,24 +309,34 @@ def cmd_ui(args: argparse.Namespace, settings: Settings) -> int:
     return serve(settings, demo=args.demo, host=args.host, port=args.port, open_browser=not args.no_browser)
 
 
-def cmd_ask(args: argparse.Namespace, settings: Settings) -> int:
-    """Start a run in the console that is already open (`jevosx ui`), which then talks it through with you."""
-    import urllib.error
+def _console_call(console: dict[str, Any], path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     import urllib.request
+
+    request = urllib.request.Request(
+        console["url"].rstrip("/") + path,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "X-JevOSX-Token": console["token"]},
+        method="GET" if body is None else "POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        data = json.loads(response.read() or b"{}")
+    return data if isinstance(data, dict) else {}
+
+
+def cmd_ask(args: argparse.Namespace, settings: Settings) -> int:
+    """Start a run in the console that is already open (`jevosx ui`), which then talks it through with you. With
+    --wait, print its steps as they happen and exit with its outcome (0 when done)."""
+    import urllib.error
 
     from .ui.server import console_file
 
     goal = " ".join(args.goal).strip()
     try:
         console = json.loads(console_file().read_text(encoding="utf-8"))
-        request = urllib.request.Request(
-            console["url"].rstrip("/") + "/api/run",
-            data=json.dumps({"goal": goal}).encode(),
-            headers={"Content-Type": "application/json", "X-JevOSX-Token": console["token"]},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            json.loads(response.read() or b"{}")
+        run_id = _console_call(console, "/api/run", {"goal": goal}).get("run_id")
+        print(f"started: {goal}", flush=True)
+        if args.wait:
+            return _follow(console, str(run_id or ""), args.timeout)
     except FileNotFoundError:
         print("the console is not running: start it with jevosx ui", file=sys.stderr)
         return 2
@@ -335,8 +347,33 @@ def cmd_ask(args: argparse.Namespace, settings: Settings) -> int:
     except (OSError, ValueError, KeyError) as exc:
         print(f"cannot reach the console ({exc}): is jevosx ui still running?", file=sys.stderr)
         return 2
-    print(f"started: {goal}")
     return 0
+
+
+def _follow(console: dict[str, Any], run_id: str, timeout_s: float) -> int:
+    """Print a console run's steps and questions as they happen; the outcome decides the exit code."""
+    shown, asked = 0, set()
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        state = _console_call(console, "/api/state")
+        run = state.get("current") or {}
+        if run.get("id") != run_id:
+            run = next((r for r in state.get("history", []) if r.get("id") == run_id), run)
+        for event in run.get("events", [])[shown:]:
+            message = f" · {event['message']}" if event.get("message") else ""
+            print(f"  {event.get('step')} {event.get('status')} {event.get('action') or ''}{message}", flush=True)
+        shown = len(run.get("events", []))
+        for pending in state.get("pending_approvals", []):
+            if pending["request_id"] not in asked:
+                asked.add(pending["request_id"])
+                print(f"  … waiting for you in the console: {pending['action']} ({pending['reason']})", flush=True)
+        if run.get("result") is not None:
+            result = run["result"]
+            print(f"{result.get('status')} after {result.get('steps')} step(s) {result.get('message') or ''}".rstrip())
+            return 0 if result.get("status") in ("done", "success") else 1
+        time.sleep(0.5)
+    print("still running; stopped waiting (the run goes on in the console)", file=sys.stderr)
+    return 3
 
 
 # ---- diagnose ----------------------------------------------------------------------------------------------------

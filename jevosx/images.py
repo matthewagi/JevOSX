@@ -251,6 +251,25 @@ def is_thumbnail(url: str | None, page_url: str | None = None) -> bool:
     return bool(re.fullmatch(r"encrypted-tbn\d*\.gstatic\.com", urlsplit(url or "").netloc.lower()))
 
 
+_WIKIMEDIA_THUMB = re.compile(
+    r"(?P<base>/[^/]+/[^/]+)/thumb/(?P<file>[0-9a-f]/[0-9a-f]{2}/(?P<name>[^/]+))/[^/]*?\d+px-[^/]+"
+)
+_WIKIMEDIA_KEEPS = (".jpg", ".jpeg", ".png", ".gif", ".webp")  # not .svg, .pdf or .tif: the thumbnail is the picture
+
+
+def wikimedia_original(url: str | None) -> str | None:
+    """The original file behind a Wikimedia thumbnail: upload.wikimedia.org/wikipedia/commons/thumb/a/a8/X.jpg/
+    330px-X.jpg → upload.wikimedia.org/wikipedia/commons/a/a8/X.jpg. None for any other address. Seen live: a
+    picture saved from Wikipedia was its 330 by 550 thumbnail."""
+    parts = urlsplit(url or "")
+    if parts.netloc.lower() != "upload.wikimedia.org" or parts.scheme not in ("http", "https"):
+        return None
+    match = _WIKIMEDIA_THUMB.fullmatch(parts.path)
+    if not match or not unquote(match.group("name")).lower().endswith(_WIKIMEDIA_KEEPS):
+        return None
+    return f"{parts.scheme}://{parts.netloc}{match.group('base')}/{match.group('file')}"
+
+
 def imgres_target(url: str | None) -> str | None:
     """The picture a Google /imgres link points at (its imgurl), or None for any other link."""
     parts = urlsplit(url or "")

@@ -276,6 +276,18 @@ to save and how many before starting.
   because the list the 12:37 run had written was open and memory said that run finished there. A goal that asks for
   text to be written ("write a …", see `wants_generation`) is not offered DONE until a TYPE_TEXT in the same run
   has succeeded (rejecting DONE was not enough: Jev said DONE three more times after being told).
+- Seen live (the Notes run after that, 14:12): it typed the list over the note that was open instead of making a
+  new one (TYPE_TEXT sets AXValue, which replaces the text). A goal that asks for something new to be written, in a
+  notes or document app (Notes, TextEdit, Stickies, Pages, Word), now starts a new note or document before its first
+  typing into a body that already holds text: the app's own "New Note" / "New Document" button when it shows one,
+  else cmd+N. "in this note" keeps the open one.
+- Seen live (Eiffel Tower photos, 14:14): the picture saved from Wikipedia was its 330 by 550 thumbnail. A picture
+  whose address is a Wikimedia thumbnail (upload.wikimedia.org/…/thumb/…/NNNpx-name) is now saved from the original
+  file; the size cap still holds, and when the original is refused or too large the thumbnail is saved instead.
+- Seen live (14:12): the on-device reader's plan for a Notes task was "open Finder · open Applications · open Notes"
+  (and "open Finder" for photos before). When a plan step opens an app the goal names, steps that open Finder, the
+  Applications folder, Launchpad, Spotlight or the Dock are dropped (OPEN_APP launches the app directly), unless the
+  goal asks for them itself.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

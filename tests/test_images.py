@@ -577,3 +577,69 @@ def test_files_are_numbered_by_name_whatever_their_type(tmp_path):
     ImageSaver(client(lambda r: httpx.Response(200, content=PNG))).save("https://a.example/1", tmp_path, "red tulips")
     ImageSaver(client(lambda r: httpx.Response(200, content=webp))).save("https://a.example/2", tmp_path, "red tulips")
     assert sorted(p.name for p in tmp_path.iterdir()) == ["red tulips 1.png", "red tulips 2.webp"]
+
+
+# ---- originals behind Wikimedia thumbnails -------------------------------------------------------------------------
+WIKI_THUMB = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_{}.jpg/330px-Tour_Eiffel_{}.jpg"
+
+
+def test_wikimedia_original_strips_thumb_and_the_size():
+    from jevosx.images import wikimedia_original
+
+    assert wikimedia_original(WIKI_THUMB.format(1, 1)) == (
+        "https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel_1.jpg"
+    )
+    assert wikimedia_original(
+        "https://upload.wikimedia.org/wikipedia/en/thumb/0/0b/Gozo%20sunset.JPEG/lossy-page1-1280px-Gozo%20sunset.JPEG"
+    ) == ("https://upload.wikimedia.org/wikipedia/en/0/0b/Gozo%20sunset.JPEG")
+    assert wikimedia_original("https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel.jpg") is None  # original
+    assert (
+        wikimedia_original(  # a drawing's thumbnail is the picture: the original is an SVG
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Map.svg/330px-Map.svg.png"
+        )
+        is None
+    )
+    assert wikimedia_original("https://img.example/wikipedia/commons/thumb/a/a8/X.jpg/330px-X.jpg") is None
+    assert wikimedia_original(None) is None
+
+
+def wikipedia_page():
+    obs = observation(
+        [picture(i + 3, f"Eiffel Tower {i}", WIKI_THUMB.format(i, i)) for i in range(4)],
+        app=CHROME,
+        window="Eiffel Tower - Wikipedia",
+    )
+    obs.page_url = "https://en.wikipedia.org/wiki/Eiffel_Tower"
+    return obs
+
+
+def test_saves_the_original_behind_a_wikimedia_thumbnail(tmp_path, monkeypatch):
+    """Seen live: a picture saved from Wikipedia was its 330 by 550 thumbnail."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    def serve(request):
+        downloads.append(str(request.url))
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    desktop = FakeDesktop({"wiki": wikipedia_page}, "wiki", {})
+    result = google_agent(desktop, serve).run("save 2 photos of the Eiffel Tower to a folder called paris", max_steps=4)
+    assert result.status == "done" and result.steps == 2
+    assert downloads == [f"https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel_{i}.jpg" for i in (0, 1)]
+    assert desktop.executed == []  # nothing pressed: the address alone gives the original
+
+
+def test_keeps_the_wikimedia_thumbnail_when_the_original_is_too_large(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    def serve(request):
+        downloads.append(str(request.url))
+        big = "/thumb/" not in str(request.url)
+        return httpx.Response(200, content=PNG * (100 if big else 1), headers={"content-type": "image/png"})
+
+    agent = google_agent(FakeDesktop({"wiki": wikipedia_page}, "wiki", {}), serve)
+    agent.image_saver = ImageSaver(client(serve), max_bytes=len(PNG) * 10)  # the size cap still holds
+    result = agent.run("save 1 photo of the Eiffel Tower to a folder called paris", max_steps=3)
+    assert result.status == "done"
+    assert [("/thumb/" in u) for u in downloads] == [False, True]  # the original refused, then the thumbnail

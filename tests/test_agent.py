@@ -502,7 +502,10 @@ def test_a_goal_to_write_is_not_done_before_anything_was_typed(tmp_path):
         [element(1, "AXTextArea", "Body", value="milk eggs bread", kind="text_input", ops=("TYPE_TEXT", "CLICK"))],
         text="milk eggs bread",
     )
-    desktop = FakeDesktop({"note": lambda: earlier}, "note", {})
+    fresh = observation(
+        [element(1, "AXTextArea", "Body", value="", kind="text_input", ops=("TYPE_TEXT", "CLICK"))], text=""
+    )
+    desktop = FakeDesktop({"note": lambda: earlier, "new": lambda: fresh}, "note", {("note", "CMD_N"): "new"})
 
     offered = []
 
@@ -513,5 +516,42 @@ def test_a_goal_to_write_is_not_done_before_anything_was_typed(tmp_path):
     agent, _, _ = make_agent(tmp_path, done_when_offered, desktop=desktop)
     with agent:
         result = agent.run("write a shopping list: milk, eggs, bread", text_slots={"list": "milk, eggs, bread"})
-    assert offered == [False, True] and result.status == "done"
-    assert len(desktop.executed) == 1 and desktop.executed[0].startswith("TYPE_TEXT")
+    assert offered == [False, False, True] and result.status == "done"
+    assert desktop.executed == ["PRESS_KEY CMD_N (cmd+n)", 'TYPE_TEXT [1] textarea "Body" <- milk, eggs, bread']
+
+
+NOTES = AppInfo("Notes", "com.apple.Notes", pid=200)
+
+
+def notes_screens():
+    def note(index, value):
+        return [
+            element(1, "AXButton", "New Note"),
+            element(index, "AXTextArea", "Note Body", value=value, kind="text_input", ops=("TYPE_TEXT", "CLICK")),
+            element(2, "AXTextField", "Search", kind="text_input", ops=("TYPE_TEXT", "CLICK")),  # never a new note
+        ]
+
+    return {
+        "old": lambda: observation(note(3, "Holiday plans: Gozo, Comino"), app=NOTES, window="Notes"),
+        "new": lambda: observation(note(4, ""), app=NOTES, window="Notes"),
+    }
+
+
+def test_writing_something_new_in_notes_starts_a_new_note(tmp_path):
+    """Seen live: "open Notes and write a shopping list: milk, eggs, bread" replaced the note that was open."""
+    desktop = FakeDesktop(notes_screens(), "old", {("old", "New Note"): "new"})
+    agent, _, _ = make_agent(tmp_path, lambda body: {"operation": "TYPE_TEXT"}, desktop=desktop)
+    with agent:
+        result = agent.run("open Notes and write a shopping list: milk, eggs, bread", text_slots={"list": "milk"})
+    assert result.status != "error"
+    assert desktop.executed[0] == 'CLICK [1] button "New Note"'  # the open note is kept
+    assert all("Holiday" not in e for e in desktop.executed)
+    assert desktop.executed[1].startswith('TYPE_TEXT [4] textarea "Note Body"')
+
+
+def test_writing_into_this_note_keeps_it(tmp_path):
+    desktop = FakeDesktop(notes_screens(), "old", {("old", "New Note"): "new"})
+    agent, _, _ = make_agent(tmp_path, lambda body: {"operation": "TYPE_TEXT"}, desktop=desktop)
+    with agent:
+        agent.run("write a packing list in this note", text_slots={"list": "towels"}, max_steps=1)
+    assert desktop.executed[0].startswith('TYPE_TEXT [3] textarea "Note Body"')

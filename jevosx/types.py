@@ -284,6 +284,35 @@ BROWSER_BUNDLES = frozenset(
 )
 
 
+# Apps where a goal to write something new gets a new note or document: typing into the open one replaces it.
+DOCUMENT_BUNDLES = frozenset(
+    {
+        "com.apple.Notes",
+        "com.apple.TextEdit",
+        "com.apple.Stickies",
+        "com.apple.iWork.Pages",
+        "com.microsoft.Word",
+    }
+)
+NEW_DOCUMENT = re.compile(r"new (?:note|document|blank document|page|sticky)", re.IGNORECASE)
+# "write a haiku in this document": the person means the open one.
+OPEN_DOCUMENT = re.compile(
+    r"\b(?:this|that|the open|the current|my current|the existing|the same)\s+(?:note|document|doc|file|page)\b",
+    re.IGNORECASE,
+)
+
+
+def is_document_body(element: UIElement | None, app: AppInfo) -> bool:
+    """The text of a note or document (not its search field) in one of DOCUMENT_BUNDLES."""
+    return (
+        element is not None
+        and app.bundle_id in DOCUMENT_BUNDLES
+        and element.role == "AXTextArea"
+        and not element.in_web_area
+        and not element.secure
+    )
+
+
 def is_address_bar(element: UIElement | None, app: AppInfo) -> bool:
     """A browser's own address/search bar: a text field of a browser that is not part of any web page."""
     return (

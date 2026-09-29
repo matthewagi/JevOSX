@@ -4,7 +4,7 @@ from jevosx.agent import Agent
 from jevosx.config import Settings
 from jevosx.errors import TextUnavailableError
 from jevosx.executor.keys import key_vocabulary
-from jevosx.planner import Planner, merge_slots, needs_plan, parse_plan, parse_reading
+from jevosx.planner import Planner, drop_detours, merge_slots, needs_plan, parse_plan, parse_reading
 from jevosx.router.policy import JevRouter
 from tests.fakes import FB_GOAL, FakeDesktop, element, observation, scripted_client
 
@@ -80,6 +80,57 @@ def test_agent_shows_the_plan_and_sends_it_to_jev_as_a_hint():
     requests.clear()
     agent.run("Open Notes")
     assert "plan" not in requests[0]["state"]
+
+
+APPS = {"Notes", "TextEdit", "Finder"}.__contains__
+
+
+@pytest.mark.parametrize(
+    ("steps", "goal", "kept"),
+    [
+        (  # seen live
+            ["open Finder", "open Applications", "open Notes", "Write the shopping list"],
+            "open Notes and write a shopping list: milk, eggs, bread",
+            ["open Notes", "Write the shopping list"],
+        ),
+        (
+            ["Open the Finder app", "Go to the Applications folder", "Launch TextEdit", "Type the note"],
+            "write a short thank-you note to my neighbour in TextEdit",
+            ["Launch TextEdit", "Type the note"],
+        ),
+        (["Open Finder", "Open Applications", "Open Notes"], "open Notes and make a list", []),  # one step is no plan
+        (  # no app named: Finder is the way to a folder
+            ["Open Finder", "Open Downloads", "Create a folder"],
+            "move my downloads into a new folder",
+            ["Open Finder", "Open Downloads", "Create a folder"],
+        ),
+        (  # the goal asks for them itself
+            ["Open Finder", "Open the Applications folder", "Open Notes"],
+            "open the Applications folder in Finder, then open Notes",
+            ["Open Finder", "Open the Applications folder", "Open Notes"],
+        ),
+    ],
+)
+def test_ways_to_an_app_the_goal_names_are_dropped_from_the_plan(steps, goal, kept):
+    assert drop_detours(steps, goal, APPS) == kept
+
+
+def test_agent_plans_without_the_way_through_finder():
+    desktop = FakeDesktop({"doc": lambda: observation([element(1, "AXButton", "New Note")])}, "doc", {})
+    requests: list[dict] = []
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(lambda body: {"operation": "BLOCKED"}, requests), keys=key_vocabulary()),
+        settings=settings,
+        planner=Planner(Writer("1. open Finder\n2. open Applications\n3. open Notes\n4. write the list")),
+        sleep=lambda _s: None,
+    )
+    agent.run("open Notes and write a shopping list: milk, eggs, bread", max_steps=1)
+    assert agent.last_plan == ["open Notes", "write the list"]
+    assert requests[0]["state"]["plan"] == ["1. open Notes", "2. write the list"]
 
 
 MODEL_ANSWER = """**STEPS:**

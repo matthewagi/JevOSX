@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .errors import JevOSXError, TextUnavailableError
@@ -96,6 +97,37 @@ def parse_plan(text: str) -> list[str]:
         if len(steps) == MAX_STEPS:
             break
     return steps if len(steps) >= 2 else []
+
+
+_OPENS = re.compile(
+    r"^(?:open|launch|start|go to|switch to|navigate to|find)\s+(?:the\s+)?(?P<name>.+?)(?:\s+app)?\.?$", re.IGNORECASE
+)
+_DETOUR = re.compile(r"^(?:finder|applications?(?: folder)?|launchpad|spotlight|(?:the )?dock)$", re.IGNORECASE)
+
+
+def drop_detours(steps: list[str], goal: str, is_app: Callable[[str], bool]) -> list[str]:
+    """Without the ways to an app the goal names (Finder, the Applications folder, Launchpad): OPEN_APP launches it
+    directly. Seen live: "open Finder · open Applications · open Notes" for a Notes task, and Jev followed plans like
+    that into Finder. Kept when the goal names no app (is_app: an app with exactly this name exists), or asks for
+    Finder or the Applications folder itself."""
+    words = set(re.findall(r"\w+", goal.lower()))
+
+    def opened(step: str) -> str | None:
+        match = _OPENS.match(step.strip())
+        return match.group("name").strip() if match else None
+
+    def in_goal(name: str) -> bool:
+        return set(re.findall(r"\w+", name.lower())) <= words
+
+    named = any((name := opened(step)) and not _DETOUR.match(name) and in_goal(name) and is_app(name) for step in steps)
+    if not named:
+        return steps
+    kept = [
+        step
+        for step in steps
+        if not ((name := opened(step)) and _DETOUR.match(name) and not set(re.findall(r"\w+", name.lower())) & words)
+    ]
+    return kept if len(kept) >= 2 else []
 
 
 def _slot_name(raw: str) -> str:

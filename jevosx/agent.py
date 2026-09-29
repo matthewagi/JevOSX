@@ -45,12 +45,13 @@ from .images import (
     original_of,
     page_key,
     search_address,
+    wikimedia_original,
 )
 from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import BackgroundObserver, Observer, WindowRef
-from .planner import GoalReading, Planner, merge_slots
+from .planner import GoalReading, Planner, drop_detours, merge_slots
 from .risk import CAREFUL, StepRisk, assess, is_sign_in
 from .router.client import ChoiceAnswer
 from .router.policy import Decision, JevRouter, redact
@@ -64,7 +65,9 @@ from .types import (
     DONE,
     FOCUS_WINDOW,
     MENU,
+    NEW_DOCUMENT,
     OPEN_APP,
+    OPEN_DOCUMENT,
     PRESS_KEY,
     SAVE_IMAGE,
     SCROLL_DOWN,
@@ -78,6 +81,7 @@ from .types import (
     clean_text,
     is_address_bar,
     is_console_window,
+    is_document_body,
 )
 from .writer import TextWriter, create_writer, wants_generation
 
@@ -319,6 +323,7 @@ class Agent:
         max_steps = max_steps or cfg.max_steps
         # The writer's model reads the goal once (steps + exact values to type); patterns fill in when it cannot.
         reading = self.planner.read(goal) if self.planner is not None else GoalReading()
+        reading.steps = drop_detours(reading.steps, goal, self._is_app)
         plan = reading.steps
         self.last_plan = plan
         slots = merge_slots(reading.values, slots_from_goal(goal))
@@ -360,6 +365,7 @@ class Agent:
         launching: tuple[AppInfo, _Pending] | None = None  # an app asked to come forward, not in front yet
         launch_reads = 0
         asks_writing, typed_any = wants_generation(goal), False  # a goal to write text is not done before typing
+        fresh_document = bool(OPEN_DOCUMENT.search(goal))  # a new note or document to write in (or the person's own)
 
         def emit(event: StepEvent) -> StepEvent:
             events.append(event)
@@ -662,6 +668,24 @@ class Agent:
                         break
                     continue
 
+                if (
+                    asks_writing
+                    and not (typed_any or fresh_document)
+                    and op == TYPE_TEXT
+                    and decision.target is not None
+                    and is_document_body(decision.target.element, obs.app)
+                    and getattr(decision.target.element, "value", None) != ""  # empty: already new; unknown: not
+                ):
+                    # Seen live: "open Notes and write a shopping list" typed over the note that was open. Something
+                    # new goes into a new note or document; the open one is kept (unless the goal says "this note").
+                    fresh_document = True
+                    steps += 1
+                    made, detail = self._new_document(obs)
+                    history.append({"step": steps, "action": made, "result": detail})
+                    event.action, event.status, event.message = made, "acted", detail
+                    yield emit(event)
+                    continue
+
                 try:
                     action = self._to_action(decision, text_source, goal, obs, history)
                     text_failures = 0
@@ -755,6 +779,7 @@ class Agent:
                 elif result.unconfirmed:
                     pending = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
                 typed_any = typed_any or (result.ok and op == TYPE_TEXT)
+                fresh_document = fresh_document or ((result.ok or result.unconfirmed) and makes_document(action))
                 if result.ok and op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app):
                     navigation, page_reads = page_where(obs), PAGE_READS
                 event.status = "acted" if result.ok else "failed"
@@ -962,7 +987,9 @@ class Agent:
         if isinstance(self.executor, DryRunExecutor):
             return True, f"dry run: would save it into {display_path(task.folder)}"
         original = (
-            self._original(element, obs, task) if element is not None and is_thumbnail(url, obs.page_url) else None
+            self._original(element, obs, task)
+            if element is not None and is_thumbnail(url, obs.page_url)
+            else wikimedia_original(url)
         )
         failure: ImageSaveError | None = None
         for source in (original, url) if original else (url,):  # a site that refuses: Google's copy is still good
@@ -1002,6 +1029,40 @@ class Agent:
                 e.url for e in obs.elements if e.kind == "image" and e.label == thumbnail.label and e.url
             )
         return found
+
+    def _new_document(self, obs: Observation) -> tuple[str, str]:
+        """Start a new note or document in the front app: its own "New Note" / "New Document" button when it shows
+        one (an AX press needs no keyboard), else cmd+N. Returns what was done and how it went, for the history."""
+        button = next(
+            (e for e in obs.elements if e.enabled and CLICK in e.ops and NEW_DOCUMENT.fullmatch(e.label or "")), None
+        )
+        key = self.router.keys.get("CMD_N")
+        tries = [Action(CLICK, element=button)] if button is not None else []
+        tries += [Action(PRESS_KEY, key=key)] if key is not None else []
+        detail = "no way to start a new document here"
+        for action in tries:
+            before = self._front() if self._behind else None
+            try:
+                result = self.executor.execute(action, obs)
+            except JevOSXError as exc:
+                detail = f"failed: {exc}"
+                continue
+            if result.ok or result.unconfirmed:
+                self._settle()
+            if self._behind:
+                self._after_action(before, acted_pid=obs.app.pid, known={a.pid for a in obs.running_apps})
+            if result.ok or result.unconfirmed:
+                return _history_action(action), "ok: a new note or document to write in, the open one is kept"
+            detail = f"failed: {result.detail}"
+        return "NEW_DOCUMENT", detail
+
+    def _is_app(self, name: str) -> bool:
+        """An app with exactly this name is running or installed ("Notes", not "Downloads")."""
+        try:
+            found = self.observer.find_app(name)
+        except JevOSXError:
+            return False
+        return found is not None and found.name.lower() == name.lower()
 
     def _open_requested_app(self, query: str) -> ActionResult:
         target = self.observer.find_app(query)
@@ -1097,6 +1158,13 @@ def pictures_ready(obs: Observation, images: ImageTask) -> bool:
         return True
     pictures = any(SAVE_IMAGE in e.ops and e.url not in images.saved_urls for e in obs.elements)
     return pictures or any(area.in_web_area for area in obs.scroll_areas)
+
+
+def makes_document(action: Action) -> bool:
+    """Jev's own step that starts a new note or document (the button, the menu item or cmd+N)."""
+    if action.operation == PRESS_KEY:
+        return action.key is not None and action.key.id == "CMD_N"
+    return action.operation in (CLICK, MENU) and bool(action.element and NEW_DOCUMENT.fullmatch(action.element.label))
 
 
 def same_app(current: AppInfo, wanted: AppInfo) -> bool:

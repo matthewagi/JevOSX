@@ -295,3 +295,46 @@ def test_results_page_and_value_lines_in_the_plan():
     assert parse_plan(seen_live) == []  # one real step is no plan
     assert "finder" not in intent_apps(GOAL, set())
     assert "finder" in intent_apps("open my downloads folder", set())
+
+
+def test_keeps_saving_from_a_page_it_chose_and_scrolls_for_more(tmp_path, monkeypatch):
+    """Seen live: after two saves on Unsplash, Jev clicked a carousel's left and right buttons until out of steps."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    page = "https://unsplash.com/s/photos/golden-retriever"
+    carousel = element(2, "AXButton", "scroll list to the right", in_web_area=True)
+
+    def gallery(first):
+        def build():
+            pictures = [picture(i + 3, f"Dog {i}", f"https://img.example/{i}.jpg") for i in range(first, first + 2)]
+            area = element(1, "AXScrollArea", "web page", ops=("SCROLL_UP", "SCROLL_DOWN"), kind="scroll_area",
+                           in_web_area=True, frame=Rect(0, 0, 800, 600))  # fmt: skip
+            obs = observation([carousel, *pictures], app=CHROME, window="Unsplash")
+            obs.scroll_areas = [area]
+            obs.page_url = page
+            return obs
+
+        return build
+
+    asked = []
+
+    def jev(body):
+        asked.append(body)
+        if "image_target" in body["questions"] or "SAVE_IMAGE" in body["questions"]["operation"]["criteria"]:
+            return {"operation": "SAVE_IMAGE"}
+        return {"operation": "CLICK"}  # the carousel
+
+    desktop = FakeDesktop({"top": gallery(0), "below": gallery(2)}, "top", {("top", "SCROLL_DOWN"): "below"})
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(jev), keys=key_vocabulary()),
+        settings=settings,
+        image_saver=ImageSaver(client(lambda r: httpx.Response(200, content=PNG))),
+        sleep=lambda _s: None,
+    )
+    result = agent.run(GOAL, max_steps=8)
+    assert result.status == "done" and len(asked) == 1  # Jev chose the first picture; the rest followed
+    assert [e.split(" [")[0] for e in desktop.executed] == ["SCROLL_DOWN"]
+    assert len(list((tmp_path / "Desktop" / "dogs").iterdir())) == 3

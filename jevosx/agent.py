@@ -41,7 +41,7 @@ from .images import (
     file_stem,
     image_plan,
     image_task,
-    is_results_page,
+    page_key,
     search_address,
 )
 from .logins import LoginStore, credential_slots
@@ -52,7 +52,7 @@ from .planner import GoalReading, Planner, merge_slots
 from .risk import CAREFUL, StepRisk, assess, is_sign_in
 from .router.client import ChoiceAnswer
 from .router.policy import Decision, JevRouter, redact
-from .router.space import ActionSpace
+from .router.space import ActionSpace, Target
 from .router.text import ADDRESS, TextSource, slot_kind, slots_from_goal, template_slots
 from .types import (
     ASK_USER,
@@ -63,6 +63,7 @@ from .types import (
     OPEN_APP,
     PRESS_KEY,
     SAVE_IMAGE,
+    SCROLL_DOWN,
     TYPE_TEXT,
     WAIT,
     Action,
@@ -76,6 +77,7 @@ from .writer import TextWriter, create_writer, wants_generation
 log = logging.getLogger("jevosx")
 T = TypeVar("T")
 MAX_IMAGE_FAILURES = 3
+MAX_PICTURE_SCROLLS = 4  # scrolls in a row for more pictures before Jev decides again
 # Questions an image-saving goal never needs answered first: the folder and the number of pictures have defaults.
 IMAGE_DEFAULTS = re.compile(
     r"\b(?:folder|directory|where|location|destination|save|path|how many|count|number|quantity)\b", re.IGNORECASE
@@ -840,6 +842,9 @@ class Agent:
         except ImageSaveError as exc:
             return False, f"failed: {exc}"
         task.saved.append(path)
+        if obs.page_url:
+            task.pages.add(page_key(obs.page_url))
+        task.scrolls = 0
         return True, f"saved {path.name} ({task.progress()})"
 
     def _open_requested_app(self, query: str) -> ActionResult:
@@ -927,17 +932,28 @@ CONSOLE_NAVIGATION = frozenset({PRESS_KEY, MENU, OPEN_APP, FOCUS_WINDOW})
 
 
 def next_picture(space: ActionSpace, obs: Observation, images: ImageTask | None) -> Decision | None:
-    """On the picture results for the topic, every picture fits: the next one is saved without asking Jev. Seen
-    live: on that page Jev followed a link to another site instead of saving."""
-    if images is None or not is_results_page(obs.page_url, images.topic):
+    """On a page that is a source of pictures (the picture results for the topic, or a page Jev already saved
+    from), every picture fits: the next one is saved without asking Jev, and when all visible ones are saved the
+    page is scrolled for more. Seen live: on the results Jev followed a link to another site instead of saving, and
+    after two saves on Unsplash it clicked a carousel's left and right buttons in turn until it ran out of steps."""
+    if images is None or not images.is_source(obs.page_url):
         return None
     targets = space.targets_for(SAVE_IMAGE)
-    if not targets:
-        return None  # all saved: Jev decides (scroll for more, or another page)
-    first = min(targets.values(), key=lambda t: t.element.index if t.element is not None else 0)
-    certain = ChoiceAnswer(SAVE_IMAGE, {SAVE_IMAGE: 1.0}, 1.0)
-    pick = ChoiceAnswer(first.id, {first.id: 1.0}, 1.0)
-    return Decision(SAVE_IMAGE, certain, target=first, target_answer=pick, model="results page")
+    if targets:
+        first = min(targets.values(), key=lambda t: t.element.index if t.element is not None else 0)
+        return _certain_decision(SAVE_IMAGE, first)
+    areas = [t for t in space.targets_for(SCROLL_DOWN).values() if t.element is not None and t.element.in_web_area]
+    if not areas or images.scrolls >= MAX_PICTURE_SCROLLS:
+        return None  # nothing to scroll, or scrolling found nothing new: Jev decides
+    images.scrolls += 1
+    page = max(areas, key=lambda t: t.element.frame.h if t.element and t.element.frame else 0)
+    return _certain_decision(SCROLL_DOWN, page)
+
+
+def _certain_decision(operation: str, target: Target) -> Decision:
+    certain = ChoiceAnswer(operation, {operation: 1.0}, 1.0)
+    pick = ChoiceAnswer(target.id, {target.id: 1.0}, 1.0)
+    return Decision(operation, certain, target=target, target_answer=pick, model="picture source page")
 
 
 def without_pictures(obs: Observation) -> None:

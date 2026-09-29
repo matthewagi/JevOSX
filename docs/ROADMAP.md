@@ -229,6 +229,10 @@ to save and how many before starting.
   "folder", and on Google's picture results Jev followed a link to Unsplash. Now picture goals get a fixed plan
   (browser → picture_search → SAVE_IMAGE), Finder is not offered for them, "name: value" lines are never plan
   steps, and on the picture results for the topic the next picture is saved without asking Jev.
+- Seen live (second run): 2 of 3 pictures saved on Unsplash in 3 steps, then Jev clicked a carousel's "scroll list
+  to the right" and "left" buttons in turn until out of steps. A page a picture was saved from is now a source like
+  the results page: the next picture is saved without asking, and when all visible ones are saved the page is
+  scrolled down (up to 4 times in a row) before Jev decides again.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

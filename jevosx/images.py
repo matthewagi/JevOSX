@@ -96,6 +96,12 @@ class ImageTask:
     topic: str = ""
     saved: list[Path] = field(default_factory=list)
     saved_urls: set[str] = field(default_factory=set)
+    pages: set[str] = field(default_factory=set)  # pages a picture was saved from: sources for the rest
+    scrolls: int = 0  # scrolled for more pictures since the last one was saved
+
+    def is_source(self, page_url: str | None) -> bool:
+        """A page to keep saving from: the picture results for the topic, or a page Jev already saved from."""
+        return is_results_page(page_url, self.topic) or (bool(page_url) and page_key(page_url) in self.pages)
 
     @property
     def complete(self) -> bool:
@@ -221,6 +227,11 @@ def is_results_page(url: str | None, topic: str) -> bool:
         return False
     searched = " ".join(query.get("q", [])).lower()
     return all(word in searched for word in topic.lower().split())
+
+
+def page_key(url: str | None) -> str:
+    """A page without its fragment: scrolling or a gallery overlay must not make it another page."""
+    return (url or "").split("#", 1)[0]
 
 
 def savable_url(url: str | None) -> bool:

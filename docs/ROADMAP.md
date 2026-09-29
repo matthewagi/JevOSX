@@ -328,6 +328,11 @@ to save and how many before starting.
   counted as arrived. After a link, only a new title counts now (still bounded by PAGE_READS). The same run also
   typed facebook.com into the address bar three times on facebook.com (conf 0.60–0.64): Jev's choice, with four
   memory hints from the earlier Facebook runs; not changed.
+- Seen live (16:18, welding machine): the new-title wait worked ("Marketplace" clicked, then "Search Marketplace"
+  at 0.98). The repeated address typing was the page-load wait again: Chrome gave the window the title "Facebook"
+  while the page itself had nothing readable yet (30 elements, all Chrome's own), so the page counted as arrived,
+  and Jev, seeing an empty page, typed facebook.com twice more. A page now counts as arrived only once something in
+  its web area can be read.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

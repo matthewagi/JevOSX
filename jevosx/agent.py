@@ -1209,9 +1209,12 @@ def page_arrived(obs: Observation, before: tuple[str, str], *, new_title: bool =
     """After Return in a browser's address bar or a clicked link: whether the new page is there to be judged. Seen
     live: the read right after searching still showed "about:blank", and Jev said DONE on it before the results had
     loaded. After a link (`new_title`), the address alone is not enough: Facebook changed it 0.3 s after the click
-    and still showed the old page, under the old title, until 0.9 s."""
+    and still showed the old page, under the old title, until 0.9 s. Nor is the title: facebook.com had its title
+    before anything of the page could be read, and Jev, seeing an empty page, typed the address again."""
     if obs.app.bundle_id not in BROWSER_BUNDLES:
         return True  # the agent is looking at something else now
+    if not any(element.in_web_area for element in obs.elements):
+        return False
     now = page_where(obs)
     if new_title:
         return now[1] != before[1]

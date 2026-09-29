@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from jevosx.agent import Agent
+from jevosx.agent import Agent, page_arrived
 from jevosx.agent import expect_text_verifier as text_verifier
 from jevosx.config import Settings
 from jevosx.errors import StaleElementError
@@ -343,11 +343,12 @@ CHROME = AppInfo("Google Chrome", "com.google.Chrome", pid=300)
 SEARCHED = "the weather in Valletta tomorrow"
 
 
-def chrome_page(title, url, value=""):
+def chrome_page(title, url, value="", content=()):
     def build():
         field = element(1, "AXTextField", "Address and search bar", kind="text_input", ops=("TYPE_TEXT", "CLICK"))
         field.value = value
-        obs = observation([field], app=CHROME, window=f"{title} - Google Chrome")
+        page = [element(2 + i, "AXLink", label, in_web_area=True) for i, label in enumerate(content)]
+        obs = observation([field, *page], app=CHROME, window=f"{title} - Google Chrome")
         obs.page_url = url
         return obs
 
@@ -361,7 +362,9 @@ class LoadingChrome(FakeDesktop):
         screens = {
             "blank": chrome_page("about:blank", "about:blank"),
             "loading": chrome_page("about:blank", "about:blank", SEARCHED),
-            "results": chrome_page(f"{SEARCHED} - Google Search", "https://www.google.com/search?q=x", SEARCHED),
+            "results": chrome_page(
+                f"{SEARCHED} - Google Search", "https://www.google.com/search?q=x", SEARCHED, content=("Weather",)
+            ),
         }
         super().__init__(screens, "blank", {("blank", "TYPE_TEXT"): "loading"})
         self.delay, self.loading_reads = delay, 0
@@ -390,6 +393,14 @@ def test_done_waits_for_the_page_after_return_in_the_address_bar(tmp_path):
     assert desktop.executed == [f'TYPE_TEXT [1] textfield "Address and search bar" <- {SEARCHED}']
     assert agent.last_observation.window.title.endswith("Google Search - Google Chrome")
     assert len(requests) == 2  # Jev was not asked while the page loaded
+
+
+def test_a_page_with_a_title_but_nothing_to_read_has_not_arrived():
+    """Seen live: facebook.com had its title before any of the page could be read, and Jev typed the address again."""
+    before = ("about:blank", "New Tab - Google Chrome")
+    titled = chrome_page("Facebook", "https://www.facebook.com/", "facebook.com")()
+    loaded = chrome_page("Facebook", "https://www.facebook.com/", "facebook.com", content=("Marketplace",))()
+    assert not page_arrived(titled, before) and page_arrived(loaded, before)
 
 
 def test_done_is_rejected_while_the_page_stays_blank(tmp_path):

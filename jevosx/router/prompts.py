@@ -29,3 +29,9 @@ weak evidence: follow one only when it fits the current state and the goal."""
 TEXT_SLOT = """Choose which text to type into the field chosen for TYPE_TEXT. Match the field's meaning (label, role,
 container) to each option's name and preview. GENERATE has a writer compose new text that the goal asks for (a poem,
 a reply, a summary); choose it when no prepared text is what this field needs."""
+
+TEXT_FOR_FIELD = """Choose the text to type into the field described in 'field' (its label, role, current value
+and where it is). Match the field's meaning to each option's name and preview: a browser's address bar takes a
+website address or search words, a Title field takes the title, a Price field takes the price, a Description field
+takes the description. GENERATE has a writer compose new text that the goal asks for; choose it when no prepared
+text is what this field needs."""

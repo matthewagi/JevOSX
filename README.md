@@ -223,7 +223,7 @@ handled:
 | `agent.low_confidence_policy` | Behaviour |
 | --- | --- |
 | `retry` (default) | withhold, wait, re-observe; after `max_low_confidence_retries`, stop with status `low_confidence` |
-| `ask` | show you the proposed action; execute only if you approve, otherwise retry |
+| `ask` | look again once (`agent.ask_after_retries`), then show you the proposed action; execute only if you approve, otherwise retry |
 | `stop` | end the run immediately with status `low_confidence` |
 
 Every withheld decision is appended to `agent.fallback_log` (`~/.jevosx/fallbacks.jsonl`) with the goal, app,

@@ -266,6 +266,34 @@ CONSOLE_SAFE_KEYS = frozenset({"CMD_N", "CMD_T"})
 CONSOLE_SAFE_MENU = re.compile(r"\bnew (window|tab|private window)\b", re.IGNORECASE)
 
 
+BROWSER_BUNDLES = frozenset(
+    {
+        "com.apple.Safari",
+        "com.apple.SafariTechnologyPreview",
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "company.thebrowser.Browser",
+        "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera",
+        "org.chromium.Chromium",
+        "org.mozilla.firefox",
+    }
+)
+
+
+def is_address_bar(element: UIElement | None, app: AppInfo) -> bool:
+    """A browser's own address/search bar: a text field of a browser that is not part of any web page."""
+    return (
+        element is not None
+        and app.bundle_id in BROWSER_BUNDLES
+        and element.kind == "text_input"
+        and not element.in_web_area
+        and not element.secure
+    )
+
+
 def is_console_window(title: str | None) -> bool:
     return bool(title) and CONSOLE_WINDOW_TITLE.lower() in str(title).lower()
 
@@ -285,6 +313,7 @@ class Action:
     text_label: str | None = None  # shown instead of the text in history and logs (e.g. saved credentials)
     require_host: str | None = None  # credentials: the web page host that must still be on screen when typing
     secure_only: bool = False  # a password: may only go into a password field
+    submit: bool = False  # press Return after typing (an address or search typed into a browser's address bar)
 
     def describe(self) -> str:
         if self.element is not None:

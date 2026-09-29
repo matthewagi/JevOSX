@@ -11,13 +11,13 @@ from typing import Any
 
 from ..config import ObserverSettings
 from ..errors import StaleElementError
-from ..types import AppInfo, Observation, UIElement, WindowInfo, clean_text, is_console_window
+from ..types import BROWSER_BUNDLES, AppInfo, Observation, UIElement, WindowInfo, clean_text, is_console_window
 from . import apps as appmod
 from .ax import AX_SUCCESS, AXNode, require_ax
 from .base import WindowRef
 from .menus import walk_menu_bar
 from .vision import VisionReader, keyboard_element, needs_vision, visual_elements
-from .walker import TreeWalker, WalkLimits
+from .walker import TreeWalker, WalkLimits, dedupe_browser_fields
 
 # Chromium browsers only build their web accessibility tree when an assistive client asks for it.
 CHROMIUM_BUNDLES = frozenset(
@@ -168,7 +168,8 @@ class MacDesktopObserver:
         except StaleElementError:
             pass
         walk = self.walker.walk(roots)
-        elements, text, vision = self._with_vision(pid, focused_window, walk.elements, walk.text)
+        found = dedupe_browser_fields(walk.elements) if app.bundle_id in BROWSER_BUNDLES else walk.elements
+        elements, text, vision = self._with_vision(pid, focused_window, found, walk.text)
 
         menu_items: list[UIElement] = []
         menus_truncated = False

@@ -23,6 +23,7 @@ from ..observer.base import WindowRef
 from ..observer.walker import url_text
 from ..sites import host_matches, page_host
 from ..types import (
+    BROWSER_BUNDLES,
     CLICK,
     FOCUS_WINDOW,
     MENU,
@@ -41,21 +42,6 @@ from . import input as keyboard
 from .keys import KeyChord
 
 PRESS_ACTIONS = ("AXPress", "AXConfirm", "AXPick", "AXOpen")
-BROWSER_BUNDLES = frozenset(
-    {
-        "com.apple.Safari",
-        "com.apple.SafariTechnologyPreview",
-        "com.google.Chrome",
-        "com.google.Chrome.canary",
-        "com.microsoft.edgemac",
-        "com.brave.Browser",
-        "company.thebrowser.Browser",
-        "com.vivaldi.Vivaldi",
-        "com.operasoftware.Opera",
-        "org.chromium.Chromium",
-        "org.mozilla.firefox",
-    }
-)
 
 
 class FocusLost(Exception):
@@ -110,6 +96,9 @@ class MacExecutor:
                     result = self._type(
                         action.element, action.text, obs, secret=action.text_is_secret, prefer_keys=keys
                     )
+                    if result.ok and action.submit:  # the window is still in front from typing
+                        keyboard.post_chord(KeyChord.parse("return"), delay_s=self.settings.key_delay_s)
+                        result = ActionResult(True, result.method, "typed and pressed Return")
             elif op == MENU and action.element is not None:
                 action.element.node.perform("AXPress")
                 result = ActionResult(True, "AXPress")

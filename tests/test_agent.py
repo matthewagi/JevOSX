@@ -178,7 +178,8 @@ def test_ask_policy_executes_only_with_human_approval(tmp_path):
     with agent:
         agent.run("anything", max_steps=1)
     assert desktop.executed == ['CLICK [1] button "New Document"'] and "below the floor" in reasons[0]
-    assert fallback_records(tmp_path)[0]["resolution"] == "execute"
+    # It looks again once (a page may still be loading) and only then asks.
+    assert [r["resolution"] for r in fallback_records(tmp_path)] == ["retry", "execute"] and len(reasons) == 1
 
 
 def test_custom_low_confidence_handler(tmp_path):

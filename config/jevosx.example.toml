@@ -75,6 +75,7 @@ safe_confidence = 0.35             # easily undone: new window or tab, switch ap
 low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
 console_low_confidence_policy = "ask"  # the web console's default: you approve unsure steps instead of re-asking
 max_low_confidence_retries = 2
+ask_after_retries = 1              # with ask: look again this many times before asking you
 gate_console_navigation = false    # true: also gate new-window/app-switch moves away from the web console
 fallback_log = "~/.jevosx/fallbacks.jsonl"
 max_stale_retries = 3

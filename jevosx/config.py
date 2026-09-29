@@ -154,6 +154,8 @@ class AgentSettings:
     # In the web console someone is watching, so an unsure step is shown for approval instead of re-asked.
     console_low_confidence_policy: str = "ask"
     max_low_confidence_retries: int = 2
+    # With "ask": look again this many times before asking you. An unsure moment is often a page still loading.
+    ask_after_retries: int = 1
     # From the web console's own window the agent may only open a window/tab or switch apps/windows. Those moves
     # change nothing, so by default they are not held back by the floor (set true to gate them too).
     gate_console_navigation: bool = False
@@ -287,6 +289,8 @@ class Settings:
         for name in ("min_confidence", "safe_confidence", "routine_confidence"):
             if not 0.0 <= getattr(self.agent, name) <= 1.0:
                 raise ConfigError(f"agent.{name} must be between 0 and 1")
+        if self.agent.ask_after_retries < 0:
+            raise ConfigError("agent.ask_after_retries must be 0 or more")
         if not 2 <= self.jev.max_choices <= 255:
             raise ConfigError("jev.max_choices must be between 2 and 255")
 

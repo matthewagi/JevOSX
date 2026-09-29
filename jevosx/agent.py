@@ -279,7 +279,12 @@ class Agent:
         history: list[dict[str, Any]] = []
         events: list[StepEvent] = []
         started = self.clock()
-        episode_id = self.memory.begin_episode(goal, app=app, model=self.router.client.model) if self.memory else None
+        meta = {"plan": reading.steps, "values": {k: clean_text(v, 60) for k, v in reading.values.items()}}
+        episode_id = (
+            self.memory.begin_episode(goal, app=app, model=self.router.client.model, meta=self._mask(meta))
+            if self.memory
+            else None
+        )
         steps = 0
         status = "aborted"
         message = ""
@@ -407,7 +412,7 @@ class Agent:
                         self.gate.check(decision, risk)
                         low_confidence = 0
                     except LowConfidenceError as exc:
-                        resolution = self._handle_low_confidence(exc, goal, obs, risk)
+                        resolution = self._handle_low_confidence(exc, goal, obs, risk, attempt=low_confidence)
                         by_person = self.on_low_confidence is None and cfg.low_confidence_policy == "ask"
                         person_approved = resolution == "execute" and by_person
                         event.message = f"{exc} → {resolution}"
@@ -593,13 +598,16 @@ class Agent:
         return redact(value, self._sensitive) if self._sensitive else value
 
     def _handle_low_confidence(
-        self, exc: LowConfidenceError, goal: str, obs: Observation, risk: StepRisk | None = None
+        self, exc: LowConfidenceError, goal: str, obs: Observation, risk: StepRisk | None = None, *, attempt: int = 0
     ) -> str:
-        """Fallback for a withheld decision: custom handler, else the configured policy. Always logged."""
+        """Fallback for a withheld decision: custom handler, else the configured policy. Always logged.
+        `attempt` counts the decisions withheld in a row before this one."""
         policy = self.settings.agent.low_confidence_policy
         decision: Decision = exc.decision  # type: ignore[assignment]
         if self.on_low_confidence is not None:
             resolution = self.on_low_confidence(exc, obs)
+        elif policy == "ask" and attempt < self.settings.agent.ask_after_retries:
+            resolution = "retry"  # look again before asking: the page may still have been loading
         elif policy == "ask":
             preview = self._preview_action(decision)
             why = str(exc) + (f" ({risk.reason})" if risk is not None and risk.tier == CAREFUL else "")
@@ -746,6 +754,7 @@ class Agent:
             action.text, action.text_is_secret, action.text_source = resolved.text, resolved.secret, resolved.source
             action.text_label, action.require_host = resolved.label, resolved.host
             action.secure_only = resolved.secure_only
+            action.submit = text_source.submits(decision.text_option, action.element, obs.app)
         return action
 
     def _record(
@@ -769,7 +778,7 @@ class Agent:
             state_summary=self._mask(state_summary(obs)),
             operation=decision.operation,
             memory_key=target.memory_key if target else None,
-            target_text=self._mask(target.describe()) if target else None,
+            target_text=self._mask(target.describe() + _slot_note(decision)) if target else None,
             probability=decision.probability,
             confidence=decision.confidence,
             outcome=outcome,
@@ -827,7 +836,16 @@ def _history_action(action: Action) -> str:
         else:
             shown = repr(clean_text(action.text, 60))
         text += " ← " + shown
+        if action.submit:
+            text += " + RETURN"
     return text
+
+
+def _slot_note(decision: Decision) -> str:
+    """Which prepared text a TYPE_TEXT step chose (its name, never the text)."""
+    if decision.operation != TYPE_TEXT or decision.text_option is None:
+        return ""
+    return f" ← {decision.text_option}" + (" (asked for this field)" if decision.text_follow_up else "")
 
 
 def _ms(start: float, end: float) -> float:

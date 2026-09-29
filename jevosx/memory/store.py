@@ -10,7 +10,7 @@ import json
 import sqlite3
 import time
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,7 @@ class EpisodeRecord:
     model: str | None
     started_at: float
     finished_at: float | None
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -297,6 +298,7 @@ class MemoryStore:
         return EpisodeRecord(
             id=row["id"], goal=row["goal"], app=row["app"], status=row["status"], steps=row["steps"],
             model=row["model"], started_at=row["started_at"], finished_at=row["finished_at"],
+            meta=_meta(row["meta"]),
         )  # fmt: skip
 
     def _step(self, row: sqlite3.Row, with_vectors: bool) -> StepRecord:
@@ -318,3 +320,11 @@ class _Transaction:
 
     def __exit__(self, exc_type: object, *_: object) -> None:
         self.db.execute("ROLLBACK" if exc_type else "COMMIT")
+
+
+def _meta(raw: str | None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}

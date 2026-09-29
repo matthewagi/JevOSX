@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import TextUnavailableError
-from ..types import Observation, UIElement, clean_text
+from ..types import AppInfo, Observation, UIElement, clean_text, is_address_bar
 from ..writer.base import TextWriter
 from ..writer.openai import LLMTextWriter
 
@@ -171,6 +171,25 @@ def template_slots(goal: str, slots: Mapping[str, str]) -> dict[str, str]:
     return {"description": listing_description(title)}
 
 
+# What a slot holds, from its name or value: an address to visit, words to search for, or text for a form field.
+ADDRESS, SEARCH, CONTENT = "address", "search", "content"
+_ADDRESS_NAME = re.compile(r"^(?:url|website|site|address|link|web_?address|homepage)(?:_\d+)?$", re.IGNORECASE)
+_SEARCH_NAME = re.compile(r"^(?:phrase|search|query|keywords?|search_\w+)(?:_\d+)?$", re.IGNORECASE)
+_ADDRESS_VALUE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)  # by name otherwise: "report.pdf" is no site
+# A field in a page that asks for a web address ("Website", "URL"), so an address may go there too.
+_WANTS_ADDRESS = re.compile(r"\b(?:url|website|web ?site|web address|link|homepage)\b", re.IGNORECASE)
+
+
+def slot_kind(name: str, value: str) -> str:
+    if name == GENERATE:
+        return CONTENT
+    if _ADDRESS_NAME.match(name) or _ADDRESS_VALUE.fullmatch(value.strip()):
+        return ADDRESS
+    if _SEARCH_NAME.match(name):
+        return SEARCH
+    return CONTENT
+
+
 @dataclass(frozen=True, slots=True)
 class TextSlot:
     name: str
@@ -242,6 +261,28 @@ class TextSource:
         if self.generate:
             options[GENERATE] = {"text_name": "generate", "preview": "the writer composes the text the goal asks for"}
         return options
+
+    def kind(self, option: str) -> str:
+        slot = self.slots.get(option)
+        return slot_kind(option, slot.value) if slot is not None else CONTENT
+
+    def compatible(self, element: UIElement | None, app: AppInfo) -> list[str]:
+        """The options that make sense for this field: a browser's address bar takes an address or search words
+        (never a listing title, a login or a composition); a field in a page takes anything but an address, unless it
+        asks for one ("Website"). Falls back to every option when none fits, so nothing that worked before is lost."""
+        options = list(self.options())
+        if element is None:
+            return options
+        if is_address_bar(element, app):
+            fitting = [o for o in options if o in self.slots and self.slots[o].host is None and self.kind(o) != CONTENT]
+        else:
+            wants_address = bool(_WANTS_ADDRESS.search(element.label or ""))
+            fitting = [o for o in options if wants_address or self.kind(o) != ADDRESS]
+        return fitting or options
+
+    def submits(self, option: str | None, element: UIElement | None, app: AppInfo) -> bool:
+        """Typing an address or search words into a browser's address bar is only useful with Return after it."""
+        return option is not None and is_address_bar(element, app) and self.kind(option) in (ADDRESS, SEARCH)
 
     def default_option(self) -> str | None:
         options = list(self.options())

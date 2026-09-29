@@ -141,7 +141,9 @@ details.more summary:hover { color: var(--muted); }
 .approval h4 { margin: 0 0 4px; font-size: 13px; color: var(--warn); display: flex; align-items: center; gap: 6px; }
 .approval .act { font-family: var(--mono); font-size: 12.5px; margin: 6px 0; }
 .approval .row { display: flex; gap: 8px; margin-top: 10px; }
-.approval.resolved { opacity: .7; }
+.approval.resolved { opacity: .7; padding: 8px 14px; }
+.approval.resolved .row { margin-top: 4px; }
+.approval-item { list-style: none; }
 .btn { border: 1px solid var(--border-2); background: var(--panel-2); border-radius: 10px; padding: 7px 14px; font-weight: 600; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
@@ -485,7 +487,7 @@ function addApproval(entry, a) {
     try { await api("/api/approve", { request_id: a.request_id, allow: ok }); } catch (e) { toast(e.message); allow.disabled = deny.disabled = false; }
   };
   allow.onclick = () => answer(true); deny.onclick = () => answer(false);
-  entry.steps.after(box); entry.approvals.set(a.request_id, box);
+  entry.steps.append(h("li", { class: "approval-item" }, box)); entry.approvals.set(a.request_id, box);
   scrollFeed();
 }
 function resolveApproval(requestId, allowed) {
@@ -495,6 +497,7 @@ function resolveApproval(requestId, allowed) {
     const handoff = box.classList.contains("handoff");
     const text = handoff ? (allowed ? "Continued" : "Stopped") : allowed ? "Allowed" : "Denied";
     box.classList.add("resolved"); $(".row", box).replaceChildren(h("span", { class: allowed ? "outcome good" : "outcome bad" }, text));
+    const reason = $(".muted", box); if (reason) reason.remove();
   }
 }
 function finishRun(entry, result) {

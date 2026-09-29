@@ -231,6 +231,26 @@ def dedupe(elements: list[UIElement]) -> list[UIElement]:
     return kept
 
 
+def dedupe_browser_fields(elements: list[UIElement]) -> list[UIElement]:
+    """A browser window has one address bar, but Chrome can list a second copy of it, with another value, somewhere
+    else in the tree. Two browser text fields outside any web page with the same label are one field: the one being
+    edited (focused) is kept. Renumbers the rest."""
+    kept: list[UIElement] = []
+    fields: dict[tuple[str, str], int] = {}
+    for element in elements:
+        if element.kind == "text_input" and not element.in_web_area and element.label:
+            name = (element.role, element.label)
+            if name in fields:
+                if element.focused and not kept[fields[name]].focused:
+                    kept[fields[name]] = element
+                continue
+            fields[name] = len(kept)
+        kept.append(element)
+    for index, element in enumerate(kept, start=1):
+        element.index = index
+    return kept
+
+
 class TreeWalker:
     def __init__(self, limits: WalkLimits | None = None, clock: Callable[[], float] = time.perf_counter):
         self.limits = limits or WalkLimits()

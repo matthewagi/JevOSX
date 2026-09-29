@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar, cast
 from urllib.parse import urlsplit
 
-from ..errors import RouterContractError
+from ..errors import JevResponseError, RouterContractError
 from ..executor.keys import KeyBinding
 from ..types import CLICK, TYPE_TEXT, Observation, clean_text, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
-from .prompts import MEMORY, NEXT_ACTION, PLAN, TARGET, TEXT_SLOT
+from .prompts import MEMORY, NEXT_ACTION, PLAN, TARGET, TEXT_FOR_FIELD, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
 from .text import GENERATE, TextSource
 
@@ -28,6 +28,9 @@ CONSOLE_NOTE = (
     "new browser window (PRESS_KEY CMD_N or the New Window menu command); otherwise OPEN_APP the app the goal needs."
 )
 ELEMENT_HEADS = frozenset({HEADS[CLICK], HEADS[TYPE_TEXT]})
+# The text question is answered before Jev knows which field it is for. Below this, once the field is chosen, Jev is
+# asked again with the field in view.
+TEXT_FOLLOW_UP_BELOW = 0.8
 
 
 @dataclass
@@ -41,6 +44,8 @@ class Decision:
     model: str = ""
     latency_ms: float = 0.0
     usage: Mapping[str, Any] | None = None
+    text_candidates: list[str] = field(default_factory=list)  # the text options that fit the chosen field
+    text_follow_up: bool = False  # the text was chosen by a second question that showed Jev the field
 
     @property
     def confidence(self) -> float:
@@ -80,11 +85,34 @@ class Decision:
             out["top_targets"] = [(k, round(v, 3)) for k, v in self.target_answer.ranked(3)]
         if self.text_option is not None:
             out["text_option"] = self.text_option
+        if self.text_answer is not None:
+            out["text_confidence"] = round(self.text_answer.confidence, 4)
+            out["top_texts"] = [(k, round(v, 3)) for k, v in self.text_answer.ranked(3)]
+        if self.text_follow_up:
+            out["text_follow_up"] = True
         return out
 
 
 def _certain(choice: str) -> ChoiceAnswer:
     return ChoiceAnswer(choice, {choice: 1.0}, 1.0)
+
+
+def restrict(answer: ChoiceAnswer, allowed: Sequence[str]) -> ChoiceAnswer:
+    """Jev's distribution over only the options that fit (renormalized): ruling out options that cannot be right
+    is not doubt about the rest. The confidence keeps Jev's own calibration (its confidence relative to its
+    probability for the top option)."""
+    if set(allowed) == set(answer.probabilities):
+        return answer
+    mass = sum(answer.probabilities.get(option, 0.0) for option in allowed)
+    if mass <= 1e-9:
+        return ChoiceAnswer(allowed[0], {option: 1 / len(allowed) for option in allowed}, 0.0)
+    probabilities = {option: answer.probabilities.get(option, 0.0) / mass for option in allowed}
+    choice = max(probabilities, key=lambda option: probabilities[option])
+    return ChoiceAnswer(choice, probabilities, min(1.0, _calibration(answer) * probabilities[choice]))
+
+
+def _calibration(answer: ChoiceAnswer) -> float:
+    return answer.confidence / answer.probability if answer.probability > 1e-9 else 1.0
 
 
 def same_destination(answer: ChoiceAnswer, targets: Mapping[str, Target]) -> ChoiceAnswer:
@@ -190,7 +218,9 @@ class JevRouter:
         validate_request(state, questions, space)
         return state, questions
 
-    def decode(self, response: JevResponse, space: ActionSpace, text_source: TextSource) -> Decision:
+    def decode(
+        self, response: JevResponse, space: ActionSpace, text_source: TextSource, obs: Observation | None = None
+    ) -> Decision:
         operation_answer = response.choice("operation", space.operations)
         decision = Decision(
             operation=operation_answer.choice,
@@ -208,14 +238,44 @@ class JevRouter:
             else:
                 decision.target_answer = same_destination(response.choice(head, targets), targets)
             decision.target = targets[decision.target_answer.choice]
+            self._same_field(decision, response, space)
         if decision.operation == TYPE_TEXT:
             options = text_source.options()
+            field_element = decision.target.element if decision.target is not None else None
+            fitting = text_source.compatible(field_element, obs.app) if obs is not None else list(options)
+            decision.text_candidates = fitting
             if len(options) == 1:
                 decision.text_option = next(iter(options))
+            elif len(fitting) == 1:
+                decision.text_answer = _certain(fitting[0])  # the only text that fits this field
+                decision.text_option = fitting[0]
             elif len(options) > 1:
-                decision.text_answer = response.choice(TEXT_SLOT_HEAD, options)
+                decision.text_answer = restrict(response.choice(TEXT_SLOT_HEAD, options), fitting)
                 decision.text_option = decision.text_answer.choice
         return decision
+
+    @staticmethod
+    def _same_field(decision: Decision, response: JevResponse, space: ActionSpace) -> None:
+        """Clicking a text field and typing into it are one intent (TYPE_TEXT focuses the field itself). When Jev
+        splits its operation probability between the two for the same field, the combined probability counts."""
+        element = decision.target.element if decision.target is not None else None
+        if decision.operation not in (CLICK, TYPE_TEXT) or element is None or element.kind != "text_input":
+            return
+        other = TYPE_TEXT if decision.operation == CLICK else CLICK
+        targets = space.targets_for(other)
+        head = space.head_for(other)
+        if not targets or head is None or other not in decision.operation_answer.probabilities:
+            return
+        try:
+            chosen = next(iter(targets)) if len(targets) == 1 else response.choice(head, targets).choice
+        except JevResponseError:
+            return
+        other_element = targets[chosen].element
+        if other_element is None or other_element.index != element.index:
+            return
+        answer = decision.operation_answer
+        combined = min(1.0, _calibration(answer) * (answer.probability + answer.probabilities[other]))
+        decision.operation_answer = ChoiceAnswer(answer.choice, answer.probabilities, max(answer.confidence, combined))
 
     def decide(
         self,
@@ -232,7 +292,33 @@ class JevRouter:
             goal, obs, space, text_source=text_source, history=history, hints=hints, plan=plan
         )
         response = self.client.evaluate(state, questions)
-        return self.decode(response, space, text_source)
+        decision = self.decode(response, space, text_source, obs)
+        answer = decision.text_answer
+        if (
+            decision.operation == TYPE_TEXT
+            and answer is not None
+            and answer.confidence < TEXT_FOLLOW_UP_BELOW
+            and len(decision.text_candidates) >= 2
+        ):
+            self._ask_text_for_field(goal, state, decision, text_source)
+        return decision
+
+    def _ask_text_for_field(
+        self, goal: str, state: Mapping[str, Any], decision: Decision, text_source: TextSource
+    ) -> None:
+        """Second question, only when the first text answer was unsure: which text for THIS field, shown to Jev."""
+        assert decision.target is not None and decision.target.element is not None
+        options = text_source.options()
+        criteria = {option: options[option] for option in decision.text_candidates}
+        where = element_state(decision.target.element)
+        question = choice_question(criteria, {"goal": goal, "field": where, "rules": TEXT_FOR_FIELD})
+        questions = {TEXT_SLOT_HEAD: question}
+        redact(questions, text_source.sensitive_values())
+        response = self.client.evaluate(state, questions)
+        decision.text_answer = response.choice(TEXT_SLOT_HEAD, criteria)
+        decision.text_option = decision.text_answer.choice
+        decision.text_follow_up = True
+        decision.latency_ms = round(decision.latency_ms + response.latency_ms, 1)
 
 
 def build_state(

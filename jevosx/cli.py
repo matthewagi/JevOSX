@@ -618,6 +618,10 @@ def cmd_report(args: argparse.Namespace, settings: Settings) -> int:
         for episode in reversed(episodes):
             started = time.strftime("%H:%M:%S", time.localtime(episode.started_at))
             print(f"\n#{episode.id} {started} {episode.status} · {episode.steps} step(s) · {episode.goal!r}")
+            if episode.meta.get("plan"):
+                print("  plan: " + " · ".join(f"{i}. {s}" for i, s in enumerate(episode.meta["plan"], start=1)))
+            if episode.meta.get("values"):
+                print("  to type: " + ", ".join(f"{k}={v!r}" for k, v in episode.meta["values"].items()))
             for step in store.steps_for([episode.id], with_vectors=False):
                 probability = f" p={step.probability:.2f}" if step.probability is not None else ""
                 confidence = f" conf={step.confidence:.2f}" if step.confidence is not None else ""

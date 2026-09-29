@@ -416,6 +416,8 @@ def test_a_clicked_link_waits_for_its_page_before_jev_decides(tmp_path):
         def __init__(self):
             screens = {
                 "home": page("Facebook", "https://www.facebook.com/", "Marketplace"),
+                # the address changes first; the old page is still shown, under its old title
+                "moved": page("Facebook", "https://www.facebook.com/marketplace/", "Marketplace"),
                 "market": page("Marketplace | Facebook", "https://www.facebook.com/marketplace/", "Tools"),
             }
             super().__init__(screens, "home", {})
@@ -428,8 +430,7 @@ def test_a_clicked_link_waits_for_its_page_before_jev_decides(tmp_path):
         def observe(self):
             if self.reads is not None:
                 self.reads += 1
-                if self.reads > 3:
-                    self.screen = "market"
+                self.screen = "market" if self.reads > 3 else "moved"
             return super().observe()
 
     seen = []

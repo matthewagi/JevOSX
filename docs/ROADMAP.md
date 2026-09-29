@@ -323,6 +323,11 @@ to save and how many before starting.
   search box is "Search Facebook", so the run searched all of Facebook (/search/top) and said DONE at 0.84. A click
   on a link in a browser page now waits for the new page like Return in the address bar does (the address or title
   must change, up to PAGE_READS reads).
+- Seen live (16:14, the retry): the same thing happened. A probe showed why: after the click, Facebook changed
+  the address in 0.3 s but still showed the old page under the old title until 0.9 s, and any change of address
+  counted as arrived. After a link, only a new title counts now (still bounded by PAGE_READS). The same run also
+  typed facebook.com into the address bar three times on facebook.com (conf 0.60–0.64): Jev's choice, with four
+  memory hints from the earlier Facebook runs; not changed.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

@@ -361,6 +361,7 @@ class Agent:
         sign_ins = 0  # sign-in attempts made after typing a password
         risk: StepRisk | None = None
         navigation: tuple[str, str] | None = None  # the page Return was pressed on in the address bar
+        by_link = False  # that navigation was a clicked link: only a new title shows the new page
         page_reads = 0
         launching: tuple[AppInfo, _Pending] | None = None  # an app asked to come forward, not in front yet
         launch_reads = 0
@@ -461,7 +462,7 @@ class Agent:
                             self.memory.set_outcome(waiting.step_id, "failed")
 
                 if navigation is not None:
-                    if page_arrived(obs, navigation):
+                    if page_arrived(obs, navigation, new_title=by_link):
                         navigation = None
                     elif page_reads > 0:
                         page_reads -= 1  # Jev would judge the page the address was typed on
@@ -781,9 +782,9 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
                 typed_any = typed_any or (result.ok and op == TYPE_TEXT)
                 fresh_document = fresh_document or ((result.ok or result.unconfirmed) and makes_document(action))
-                if result.ok and (
-                    (op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app))
-                    or follows_link(action, obs)
+                by_link = result.ok and follows_link(action, obs)
+                if by_link or (
+                    result.ok and op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app)
                 ):
                     navigation, page_reads = page_where(obs), PAGE_READS
                 event.status = "acted" if result.ok else "failed"
@@ -1204,12 +1205,17 @@ def follows_link(action: Action, obs: Observation) -> bool:
     )
 
 
-def page_arrived(obs: Observation, before: tuple[str, str]) -> bool:
-    """After Return in a browser's address bar: whether the new page is there to be judged. Seen live: the read
-    right after searching still showed "about:blank", and Jev said DONE on it before the results had loaded."""
+def page_arrived(obs: Observation, before: tuple[str, str], *, new_title: bool = False) -> bool:
+    """After Return in a browser's address bar or a clicked link: whether the new page is there to be judged. Seen
+    live: the read right after searching still showed "about:blank", and Jev said DONE on it before the results had
+    loaded. After a link (`new_title`), the address alone is not enough: Facebook changed it 0.3 s after the click
+    and still showed the old page, under the old title, until 0.9 s."""
     if obs.app.bundle_id not in BROWSER_BUNDLES:
         return True  # the agent is looking at something else now
-    return not blank_page(obs) and page_where(obs) != before
+    now = page_where(obs)
+    if new_title:
+        return now[1] != before[1]
+    return not blank_page(obs) and now != before
 
 
 def next_picture(space: ActionSpace, obs: Observation, images: ImageTask | None) -> Decision | None:

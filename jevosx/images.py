@@ -65,9 +65,11 @@ _COUNT = re.compile(
     rf"(?:(?:\w+[- ]){{0,3}}?){_PICTURES}\b",
     re.IGNORECASE,
 )
+# "in"/"on" end the topic only before a place to save ("in a folder", "on my desktop"): "sunsets in Gozo" is one topic.
+_WHERE = r"(?:a|an|the|my|your|this|that|its|their|our|folder|desktop|downloads|documents|pictures)\b|~"
 _TOPIC = re.compile(
     rf"\b{_PICTURES}\s+(?:of|about|showing|with)\s+(?P<topic>.+?)"
-    r"(?=\s+(?:and|then|to|into|in|on|from|at|for)\b|[,.;!]|$)",
+    rf"(?=\s+(?:and|then|to|into|from|at|for)\b|\s+(?:in|on)\s+(?:{_WHERE})|[,.;!]|$)",
     re.IGNORECASE,
 )
 _TOPIC_BEFORE = re.compile(rf"\b(?P<topic>[\w-]+(?:\s+[\w-]+)?)\s+{_PICTURES}\b", re.IGNORECASE)

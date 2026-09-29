@@ -33,6 +33,14 @@ CHROME = AppInfo("Google Chrome", "com.google.Chrome", pid=300)
         ("save ten cat pictures", 10, "cat", "Pictures/Cat"),
         ('save 4 images of sunsets into the "beach" folder', 4, "sunsets", "Pictures/beach"),
         ("grab some wallpapers of mountains and put them in ~/Pictures/walls", 5, "mountains", "Pictures/walls"),
+        # seen live: searched "sunsets" and saved sunsets from anywhere
+        (
+            "save 4 photos of sunsets in Gozo to a folder called gozo on my desktop",
+            4,
+            "sunsets in Gozo",
+            "Desktop/gozo",
+        ),
+        ("save photos of cats in my downloads", 5, "cats", "Downloads/Cats"),
     ],
 )
 def test_reads_count_topic_and_folder_from_the_request(goal, count, topic, folder):

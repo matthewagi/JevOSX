@@ -294,6 +294,9 @@ to save and how many before starting.
   (and "open Finder" for photos before). When a plan step opens an app the goal names, steps that open Finder, the
   Applications folder, Launchpad, Spotlight or the Dock are dropped (OPEN_APP launches the app directly), unless the
   goal asks for them itself.
+- Seen live ("save 4 photos of sunsets in Gozo to a folder called gozo on my desktop", 14:26): the topic stopped at
+  "in", so it searched "sunsets" and saved sunsets from the US and elsewhere. "in"/"on" now end the topic only before
+  a place to save ("in a folder", "on my desktop", "in ~/…"): the topic is "sunsets in Gozo".
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

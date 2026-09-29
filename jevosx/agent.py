@@ -59,6 +59,7 @@ from .router.text import ADDRESS, TextSource, slot_kind, slots_from_goal, templa
 from .types import (
     ASK_USER,
     BLOCKED,
+    BROWSER_BUNDLES,
     CLICK,
     DONE,
     FOCUS_WINDOW,
@@ -71,9 +72,11 @@ from .types import (
     WAIT,
     Action,
     ActionResult,
+    AppInfo,
     Observation,
     UIElement,
     clean_text,
+    is_address_bar,
     is_console_window,
 )
 from .writer import TextWriter, create_writer, wants_generation
@@ -86,6 +89,12 @@ ORIGINAL_READS = 8  # reads of the page after pressing a thumbnail, waiting for 
 ORIGINAL_WAIT_S = 0.3
 RESULTS_READS = 10  # reads while the picture results load, before Jev decides on whatever is there
 RESULTS_WAIT_S = 0.3
+PAGE_READS = 10  # reads after Return in a browser's address bar, waiting for the new page before Jev judges it
+PAGE_WAIT_S = 0.4
+LAUNCH_READS = 10  # reads after an app was slow to come forward, before Jev decides on whatever is in front
+LAUNCH_WAIT_S = 1.0
+BLANK_PAGE = re.compile(r"^(?:about:(?:blank|newtab|home)|chrome://new-?tab|edge://newtab|favorites://)", re.IGNORECASE)
+BLANK_TITLE = re.compile(r"^(?:about:blank|new tab|start page)\b", re.IGNORECASE)
 # Questions an image-saving goal never needs answered first: the folder and the number of pictures have defaults.
 IMAGE_DEFAULTS = re.compile(
     r"\b(?:folder|directory|where|location|destination|save|path|how many|count|number|quantity)\b", re.IGNORECASE
@@ -187,6 +196,7 @@ class _Pending:
     entry: dict[str, Any]
     fingerprint: str
     operation: str
+    reported: str | None = None  # the executor reported this failure, but the action may have happened anyway
 
 
 class Agent:
@@ -345,6 +355,10 @@ class Agent:
         password_typed = False  # since the last sign-in attempt
         sign_ins = 0  # sign-in attempts made after typing a password
         risk: StepRisk | None = None
+        navigation: tuple[str, str] | None = None  # the page Return was pressed on in the address bar
+        page_reads = 0
+        launching: tuple[AppInfo, _Pending] | None = None  # an app asked to come forward, not in front yet
+        launch_reads = 0
 
         def emit(event: StepEvent) -> StepEvent:
             events.append(event)
@@ -400,14 +414,52 @@ class Agent:
                 # Resolve the previous action's effect now that we have a fresh observation.
                 if pending is not None:
                     changed = obs.fingerprint != pending.fingerprint
-                    pending.entry["result"] = "ui changed" if changed else "no visible change"
+                    if pending.reported is not None:  # the screen says whether it happened after all
+                        reported = pending.reported
+                        pending.entry["result"] = (
+                            f"ui changed (reported: {reported})" if changed else f"failed: {reported}"
+                        )
+                        seen = "changed" if changed else "failed"
+                    else:
+                        pending.entry["result"] = "ui changed" if changed else "no visible change"
+                        seen = "changed" if changed else "unchanged"
                     if self.memory is not None and pending.step_id is not None:
-                        self.memory.set_outcome(pending.step_id, "changed" if changed else "unchanged")
-                    no_change = 0 if changed or pending.operation in (WAIT, ASK_USER) else no_change + 1
+                        self.memory.set_outcome(pending.step_id, seen)
+                    if changed or pending.operation in (WAIT, ASK_USER):
+                        no_change = 0
+                    elif pending.reported is None:
+                        no_change += 1
                     pending = None
                     if no_change >= cfg.stuck_after:
                         status, message = "blocked", f"{no_change} consecutive actions produced no visible change"
                         break
+
+                if launching is not None:
+                    slow_app, waiting = launching
+                    if self._came_forward(slow_app, obs):
+                        launching = None
+                        waiting.entry["result"] = "ok (slow to come to the front)"
+                        if self.memory is not None and waiting.step_id is not None:
+                            self.memory.set_outcome(waiting.step_id, "changed")
+                        if not same_app(obs.app, slow_app):
+                            continue  # working behind: read the app that came forward
+                    elif launch_reads > 0:
+                        launch_reads -= 1  # asking Jev now would only open it again (seen live: twice, 8 s each)
+                        self.sleep(LAUNCH_WAIT_S)
+                        continue
+                    else:
+                        launching = None
+                        waiting.entry["result"] = f"failed: {waiting.reported}"
+                        if self.memory is not None and waiting.step_id is not None:
+                            self.memory.set_outcome(waiting.step_id, "failed")
+
+                if navigation is not None:
+                    if page_arrived(obs, navigation):
+                        navigation = None
+                    elif page_reads > 0:
+                        page_reads -= 1  # Jev would judge the page the address was typed on
+                        self.sleep(PAGE_WAIT_S)
+                        continue
 
                 if images is not None and images.loading > 0 and not pictures_ready(obs, images):
                     images.loading -= 1  # Jev would only see a blank or half-built page
@@ -549,6 +601,18 @@ class Agent:
                         status, message = "failed", f"stopped early: {images.progress()}"
                         break
                     continue
+                if op == DONE and navigation is not None and blank_page(obs):
+                    # Seen live: DONE (confidence 0.66) on "about:blank" right after searching, before the results.
+                    done_rejections += 1
+                    steps += 1
+                    history.append({"step": steps, "action": "DONE", "result": "rejected: the page has not loaded"})
+                    event.status, event.message = "failed", "DONE rejected: the page has not loaded yet"
+                    yield emit(event)
+                    if done_rejections > cfg.max_done_rejections:
+                        status, message = "failed", "the page did not load"
+                        break
+                    page_reads = PAGE_READS
+                    continue
                 if op == DONE:
                     if verifier is not None and not verifier(obs):
                         done_rejections += 1
@@ -651,7 +715,7 @@ class Agent:
                 if result.ok and attempt:
                     sign_ins, password_typed = sign_ins + 1, False
                 t5 = self.clock()
-                if result.ok and action.operation != OPEN_APP:
+                if (result.ok or result.unconfirmed) and action.operation != OPEN_APP:
                     self._settle()
                 if behind:
                     if op == FOCUS_WINDOW and result.ok and action.window is not None and obs.app.pid is not None:
@@ -665,19 +729,28 @@ class Agent:
                     "action": _history_action(action),
                     "result": "ok" if result.ok else f"failed: {result.detail}",
                 }
+                if result.unconfirmed and op == OPEN_APP:
+                    entry["result"] = f"not in front yet ({result.detail}); waiting for it"
                 history.append(entry)
                 step_id = self._record(
                     episode_id,
                     steps,
                     obs,
                     decision,
-                    outcome="pending" if result.ok else "failed",
+                    outcome="pending" if result.ok or result.unconfirmed else "failed",
                     text=action.text
                     if self.settings.memory.store_typed_text and not (action.text_is_secret or action.text_label)
                     else None,
                 )
                 if result.ok:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
+                elif result.unconfirmed and op == OPEN_APP and action.app is not None:
+                    waiting = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
+                    launching, launch_reads = (action.app, waiting), LAUNCH_READS
+                elif result.unconfirmed:
+                    pending = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
+                if result.ok and op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app):
+                    navigation, page_reads = page_where(obs), PAGE_READS
                 event.status = "acted" if result.ok else "failed"
                 event.result = result
                 written = ""
@@ -698,8 +771,9 @@ class Agent:
             status, message = "error", f"{type(exc).__name__}: {exc}"
             raise
         finally:
-            if pending is not None and self.memory is not None and pending.step_id is not None:
-                self.memory.set_outcome(pending.step_id, "unknown")
+            for unresolved in (pending, launching[1] if launching is not None else None):
+                if unresolved is not None and self.memory is not None and unresolved.step_id is not None:
+                    self.memory.set_outcome(unresolved.step_id, "unknown")
             if self.memory is not None and episode_id is not None:
                 self.memory.finish_episode(episode_id, status)
             self.last_result = RunResult(
@@ -855,6 +929,23 @@ class Agent:
         if moved and not watching and self.work is not None and self.work.same(after):  # only a window it put there
             cast(WindowFocuser, self.executor).bring_forward(before)
 
+    def _came_forward(self, app: AppInfo, obs: Observation) -> bool:
+        """Whether an app that was slow to open is in front now. Seen live: Notes, its AppleEvents timing out, took
+        about 16 s. Working behind, the observation shows the work window, so the front window is checked too and
+        becomes the work window when it is that app's."""
+        if same_app(obs.app, app):
+            return True
+        if not self._behind:
+            return False
+        front = self._front()
+        if front is None or front.console:
+            return False
+        found = self.observer.find_app(app.name)
+        if found is None or found.pid != front.pid:
+            return False
+        self.work = front
+        return True
+
     def _save_picture(self, decision: Decision, task: ImageTask, obs: Observation) -> tuple[bool, str]:
         """SAVE_IMAGE: download the chosen picture into the run's folder. No dialogs, no keys, nothing on screen."""
         element = decision.target.element if decision.target is not None else None
@@ -1000,6 +1091,33 @@ def pictures_ready(obs: Observation, images: ImageTask) -> bool:
         return True
     pictures = any(SAVE_IMAGE in e.ops and e.url not in images.saved_urls for e in obs.elements)
     return pictures or any(area.in_web_area for area in obs.scroll_areas)
+
+
+def same_app(current: AppInfo, wanted: AppInfo) -> bool:
+    if wanted.bundle_id and current.bundle_id:
+        return current.bundle_id == wanted.bundle_id
+    return current.name == wanted.name
+
+
+def page_where(obs: Observation) -> tuple[str, str]:
+    return obs.page_url or "", obs.window.title if obs.window else ""
+
+
+def blank_page(obs: Observation) -> bool:
+    """A browser showing an empty page (about:blank, a new tab), where nothing can have been found yet."""
+    if obs.app.bundle_id not in BROWSER_BUNDLES:
+        return False
+    if obs.page_url:  # the title can lag behind the address
+        return bool(BLANK_PAGE.match(obs.page_url))
+    return bool(BLANK_TITLE.match(obs.window.title if obs.window else ""))
+
+
+def page_arrived(obs: Observation, before: tuple[str, str]) -> bool:
+    """After Return in a browser's address bar: whether the new page is there to be judged. Seen live: the read
+    right after searching still showed "about:blank", and Jev said DONE on it before the results had loaded."""
+    if obs.app.bundle_id not in BROWSER_BUNDLES:
+        return True  # the agent is looking at something else now
+    return not blank_page(obs) and page_where(obs) != before
 
 
 def next_picture(space: ActionSpace, obs: Observation, images: ImageTask | None) -> Decision | None:

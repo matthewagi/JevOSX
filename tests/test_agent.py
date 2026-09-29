@@ -9,7 +9,7 @@ from jevosx.errors import StaleElementError
 from jevosx.executor.keys import key_vocabulary
 from jevosx.memory import HashingEmbedder, MemoryStore
 from jevosx.router.policy import JevRouter
-from jevosx.types import AppInfo
+from jevosx.types import ActionResult, AppInfo
 from tests.fakes import FakeDesktop, element, find_id, observation, scripted_client
 
 
@@ -336,3 +336,161 @@ def test_sending_needs_confirmation_by_default():
     send = element(3, "AXButton", "Send")
     mail = AppInfo("Mail", "com.apple.mail", pid=9)
     assert SafetyPolicy().check(Action("CLICK", element=send), mail).verdict == "confirm"
+
+
+# ---- waiting for a page or an app instead of judging too early ---------------------------------------------------
+CHROME = AppInfo("Google Chrome", "com.google.Chrome", pid=300)
+SEARCHED = "the weather in Valletta tomorrow"
+
+
+def chrome_page(title, url, value=""):
+    def build():
+        field = element(1, "AXTextField", "Address and search bar", kind="text_input", ops=("TYPE_TEXT", "CLICK"))
+        field.value = value
+        obs = observation([field], app=CHROME, window=f"{title} - Google Chrome")
+        obs.page_url = url
+        return obs
+
+    return build
+
+
+class LoadingChrome(FakeDesktop):
+    """A fresh Chrome window whose results appear `delay` reads after Return (never, when `delay` is None)."""
+
+    def __init__(self, delay):
+        screens = {
+            "blank": chrome_page("about:blank", "about:blank"),
+            "loading": chrome_page("about:blank", "about:blank", SEARCHED),
+            "results": chrome_page(f"{SEARCHED} - Google Search", "https://www.google.com/search?q=x", SEARCHED),
+        }
+        super().__init__(screens, "blank", {("blank", "TYPE_TEXT"): "loading"})
+        self.delay, self.loading_reads = delay, 0
+
+    def observe(self):
+        if self.screen == "loading" and self.delay is not None:
+            if self.loading_reads >= self.delay:
+                self.screen = "results"
+            self.loading_reads += 1
+        return super().observe()
+
+
+def search_then_done(body):
+    values = [e.get("value") for e in body["state"]["elements"]]
+    return {"operation": "TYPE_TEXT"} if SEARCHED not in values else {"operation": "DONE"}
+
+
+def test_done_waits_for_the_page_after_return_in_the_address_bar(tmp_path):
+    """Seen live: DONE (conf 0.66) was decided on "about:blank", before Google's results had loaded."""
+    requests = []
+    desktop = LoadingChrome(delay=3)
+    agent, _, _ = make_agent(tmp_path, search_then_done, desktop=desktop, requests=requests)
+    with agent:
+        result = agent.run(f"search Google for {SEARCHED}", text_slots={"phrase_1": SEARCHED})
+    assert result.status == "done" and result.steps == 1  # DONE is not counted as a step
+    assert desktop.executed == [f'TYPE_TEXT [1] textfield "Address and search bar" <- {SEARCHED}']
+    assert agent.last_observation.window.title.endswith("Google Search - Google Chrome")
+    assert len(requests) == 2  # Jev was not asked while the page loaded
+
+
+def test_done_is_rejected_while_the_page_stays_blank(tmp_path):
+    agent, _, _ = make_agent(tmp_path, search_then_done, desktop=LoadingChrome(delay=None))
+    with agent:
+        result = agent.run(f"search Google for {SEARCHED}", text_slots={"phrase_1": SEARCHED})
+    assert result.status == "failed" and result.message == "the page did not load"
+    assert [e.message for e in result.events if e.action == "DONE"][0] == "DONE rejected: the page has not loaded yet"
+
+
+NOTES = AppInfo("Notes", "com.apple.Notes", pid=200)
+
+
+class SlowNotes(FakeDesktop):
+    """Notes launches, but only comes to the front `arrives_after` reads later (never, when None)."""
+
+    def __init__(self, arrives_after):
+        screens = {
+            "start": lambda: observation([element(1, "AXButton", "Bold")], installed=[NOTES]),
+            "notes": lambda: observation([element(1, "AXButton", "New Note")], app=NOTES, window="All iCloud"),
+        }
+        super().__init__(screens, "start", {})
+        self.arrives_after, self.reads = arrives_after, None
+
+    def execute(self, action, obs):
+        if action.operation != "OPEN_APP":
+            return super().execute(action, obs)
+        self.opened.append(action.app.name)
+        self.reads = 0
+        return ActionResult(False, "launch", f"{action.app.name} did not become frontmost in time", unconfirmed=True)
+
+    def observe(self):
+        if self.reads is not None and self.arrives_after is not None:
+            self.reads += 1
+            if self.reads > self.arrives_after:
+                self.screen = "notes"
+        return super().observe()
+
+
+def open_notes(body):
+    labels = [e["label"] for e in body["state"]["elements"]]
+    if "New Note" in labels:
+        return {"operation": "DONE"}
+    if "app_target" not in body["questions"]:  # the apps are offered once OPEN_APP is chosen
+        return {"operation": "OPEN_APP"}
+    return {"operation": "OPEN_APP", "app_target": find_id(body, "app_target", "Notes")}
+
+
+def test_a_slow_app_is_waited_for_instead_of_opened_again(tmp_path):
+    """Seen live: OPEN_APP Notes gave up after 8 s twice in a row while a slow Notes was still coming forward."""
+    requests = []
+    desktop = SlowNotes(arrives_after=4)
+    agent, _, store = make_agent(tmp_path, open_notes, desktop=desktop, requests=requests)
+    with agent:
+        result = agent.run("open Notes")
+        steps = store.steps_for([result.episode_id], with_vectors=False)
+    assert result.status == "done" and result.steps == 1 and desktop.opened == ["Notes"]
+    assert len(requests) == 2 and requests[1]["state"]["desktop"]["frontmost_app"] == "Notes"  # none while it launched
+    assert [(s.operation, s.outcome) for s in steps] == [("OPEN_APP", "changed"), ("DONE", "final")]
+
+
+def test_an_app_that_never_comes_forward_is_left_to_jev_with_the_failure(tmp_path):
+    requests = []
+    desktop = SlowNotes(arrives_after=None)
+    agent, _, store = make_agent(tmp_path, open_notes, desktop=desktop, requests=requests)
+    with agent:
+        result = agent.run("open Notes", max_steps=2)
+        first = store.steps_for([result.episode_id], with_vectors=False)[0]
+    assert first.outcome == "failed"
+    assert result.status == "max_steps" and desktop.opened == ["Notes", "Notes"]
+    assert "failed: Notes did not become frontmost in time" in json.dumps(requests[1]["state"])
+
+
+class ErrorOnPress(FakeDesktop):
+    """The press works, but the app answers it with AXError -25205 (seen live: "New Note" in Notes)."""
+
+    def execute(self, action, obs):
+        result = super().execute(action, obs)
+        if action.operation == "CLICK":
+            return ActionResult(False, "ax-error", "perform AXPress failed with AXError -25205", unconfirmed=True)
+        return result
+
+
+def test_a_press_reported_as_an_error_counts_when_the_ui_changed(tmp_path):
+    desktop = ErrorOnPress(screens(), "start", {("start", "New Document"): "doc", ("doc", "TYPE_TEXT"): "typed"})
+    agent, _, store = make_agent(tmp_path, desktop=desktop)
+    with agent:
+        result = agent.run('Create a new document and type "hello"', verifier=text_verifier("hello"))
+        steps = store.steps_for([result.episode_id], with_vectors=False)
+    assert result.status == "success" and result.steps == 2
+    assert [(s.operation, s.outcome) for s in steps][0] == ("CLICK", "changed")
+
+
+def test_a_press_reported_as_an_error_fails_when_nothing_changed(tmp_path):
+    def press(body):
+        return {"operation": "CLICK", "click_target": find_id(body, "click_target", "New Document")}
+
+    requests = []
+    agent, _, store = make_agent(tmp_path, press, desktop=ErrorOnPress(screens(), "start", {}), requests=requests)
+    with agent:
+        result = agent.run("make a document", max_steps=2)
+        first = store.steps_for([result.episode_id], with_vectors=False)[0]
+    assert first.outcome == "failed"
+    assert "failed: perform AXPress failed with AXError -25205" in json.dumps(requests[1]["state"])

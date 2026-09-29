@@ -337,3 +337,6 @@ class ActionResult:
     method: str
     detail: str = ""
     elapsed_ms: float = 0.0
+    # Reported as failed, yet it may still take effect (a slow app coming forward later, a press the app answered
+    # with an error): the next observation decides.
+    unconfirmed: bool = False

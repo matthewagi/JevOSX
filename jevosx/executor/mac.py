@@ -19,6 +19,7 @@ from typing import Any
 
 from ..config import ExecutorSettings
 from ..errors import AXError, StaleElementError
+from ..observer.ax import AX_ATTRIBUTE_UNSUPPORTED
 from ..observer.base import WindowRef
 from ..observer.walker import url_text
 from ..sites import host_matches, page_host
@@ -119,7 +120,11 @@ class MacExecutor:
         except FocusLost as exc:
             result = ActionResult(False, "focus", str(exc))
         except AXError as exc:
-            result = ActionResult(False, "ax-error", str(exc))
+            # Seen live: Notes answered AXPress on "New Note" with -25205 and created the note all the same.
+            pressed = op in (CLICK, MENU) and exc.operation.startswith("perform")
+            result = ActionResult(
+                False, "ax-error", str(exc), unconfirmed=pressed and exc.code == AX_ATTRIBUTE_UNSUPPORTED
+            )
         result.elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
         return result
 
@@ -301,7 +306,8 @@ class MacExecutor:
                 self._activate(app.pid)  # activation requests are occasionally dropped while another app animates
                 retried = True
             time.sleep(0.05)
-        return ActionResult(False, method, f"{app.name} did not become frontmost in time")
+        # The launch or activation was asked for: a slow app (seen live: Notes) still comes forward on its own.
+        return ActionResult(False, method, f"{app.name} did not become frontmost in time", unconfirmed=True)
 
     def _check_credential(self, action: Action) -> ActionResult | None:
         """Last check before a saved login is typed: the field's own page must still be the saved site."""

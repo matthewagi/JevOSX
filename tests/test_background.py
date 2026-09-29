@@ -73,6 +73,8 @@ class WindowDesktop:
         else:
             elements = [element(1, "AXTextArea", "shell", kind="text_input", ops=("TYPE_TEXT", "CLICK"))]
         obs = observation(elements, app=app, window=window.title, running=[self.chrome, self.terminal])
+        if pid == 300 and self.typed.get(window.title):
+            obs.page_url = f"https://{self.typed[window.title]}/"  # the typed address has loaded
         assert obs.window is not None
         obs.window.node = window
         obs.windows = [WindowInfo(i, w.title, w is window, node=w) for i, w in enumerate(self.windows[pid], 1)]
@@ -284,3 +286,30 @@ def test_the_person_is_never_pulled_back_from_a_window_they_chose():
     desktop.front_pid, desktop.front_window = 300, desktop.console  # during a background click they opened the console
     agent._after_action(in_terminal, acted_pid=300, known={300, 50})
     assert desktop.fronts == [] and agent.work.window is tab
+
+
+class Refusing(Node):
+    def __init__(self, code: int) -> None:
+        super().__init__()
+        self.code = code
+
+    def perform(self, action: str) -> None:
+        from jevosx.errors import AXError
+
+        raise AXError(self.code, f"perform {action}")
+
+
+@pytest.mark.parametrize(("code", "unconfirmed"), [(-25205, True), (-25200, False)])
+def test_a_press_answered_with_25205_is_left_to_the_next_look(monkeypatch, code, unconfirmed):
+    """Seen live: Notes answered AXPress on "New Note" with -25205 and created the note all the same."""
+    executor, _ = mac_executor(monkeypatch, [300])
+    button = element(1, "AXButton", "New Note", node=Refusing(code), actions=("AXPress",))
+    result = executor.execute(Action(CLICK, element=button), observation([button]))
+    assert not result.ok and result.unconfirmed is unconfirmed and str(code) in result.detail
+
+
+def test_an_app_slow_to_come_forward_is_unconfirmed_not_failed(monkeypatch):
+    executor, _ = mac_executor(monkeypatch, [300])  # Chrome stays in front, the activation is not obeyed yet
+    executor.settings.launch_timeout_s = 0.05
+    result = executor.open_app(AppInfo("Notes", "com.apple.Notes", pid=200))
+    assert not result.ok and result.unconfirmed and "did not become frontmost" in result.detail

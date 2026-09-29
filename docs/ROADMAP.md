@@ -261,6 +261,17 @@ to save and how many before starting.
   first read found macOS's "Accessibility Access" prompt in front (com.apple.accessibility.universalAccessAuthWarn)
   and Jev clicked "Deny" at confidence 0.36 as a routine click. The safety policy now denies every action inside
   macOS permission and password prompts except OPEN_APP to leave them: granting or refusing access is the person's.
+  The TCC log later showed the prompt was for Terminal (asked through TextEdit) and timed out after 120 s: the
+  synthetic click never registered, so macOS stored no decision.
+- Seen live ("search Google for the weather in Valletta tomorrow"): DONE at confidence 0.66 while the window still
+  read "about:blank", before the results had loaded. After Return in a browser's address bar, the agent now reads
+  again (up to 10 × 0.4 s, without asking Jev) until the address or title moves on from a blank page, and DONE
+  on a blank page right after such a search is rejected.
+- Seen live ("open Notes and write a shopping list: milk, eggs, bread"): 30 s. A slow Notes (its AppleEvents timing
+  out) did not come forward within 8 s, twice, because Jev asked for OPEN_APP again after the first timeout; then
+  "New Note" reported AXError -25205 although it had created the note. A timed-out launch or activation is now
+  "unconfirmed": the agent waits for the app (up to 10 × 1 s) instead of asking Jev, and a press answered with
+  -25205 counts as done when the next read shows the UI changed.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

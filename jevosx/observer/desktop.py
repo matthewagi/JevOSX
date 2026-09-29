@@ -71,10 +71,12 @@ class MacDesktopObserver:
             except StaleElementError:
                 pass
         why = f"accessibility error {err}" if err != AX_SUCCESS else "accessibility returned no app"
-        pid = appmod.frontmost_from_window_list(exclude=frozenset({os.getpid()}))
-        if pid:
+        exclude = frozenset({os.getpid()})
+        windows = appmod.onscreen_windows()
+        listed = appmod.pick_frontmost(windows, exclude)
+        pid = appmod.choose_frontmost(windows, appmod.frontmost_from_workspace(), exclude)
+        if pid and pid == listed:
             return pid, f"window list ({why})"
-        pid = appmod.frontmost_from_workspace()
         if pid:
             return pid, f"NSWorkspace ({why})"
         return None, f"{why}; the window list and NSWorkspace found no app either"

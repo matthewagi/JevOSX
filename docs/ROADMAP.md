@@ -252,6 +252,11 @@ to save and how many before starting.
 - Seen live ("save 2 pictures of red tulips"): done in 3 steps into ~/Pictures/Red Tulips, 540×360 from Adobe Stock
   (the largest it serves) and 3000×4494 from Unsplash, but named "red tulips 1.jpg" and "red tulips 1.webp".
   Files are now numbered by name whatever their type.
+- Seen live ("write a short poem about the sea in TextEdit", 2026-09-29): blocked after 8 steps, 44 s. The
+  system-wide AXFocusedApplication query kept failing (-25204), so the frontmost app came from the window list,
+  which cannot see TextEdit running with no document window: OPEN_APP TextEdit waited 8 s four times and the agent
+  kept reading Finder. When the window list and NSWorkspace disagree and NSWorkspace's active app has no on-screen
+  window, that app is now taken as frontmost.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

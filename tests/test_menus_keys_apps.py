@@ -4,7 +4,7 @@ import pytest
 
 from jevosx.executor.input import utf16_chunks
 from jevosx.executor.keys import KeyChord, key_vocabulary
-from jevosx.observer.apps import find_app, merge_apps, pick_frontmost, scan_installed_apps
+from jevosx.observer.apps import choose_frontmost, find_app, merge_apps, pick_frontmost, scan_installed_apps
 from jevosx.observer.menus import shortcut_text, walk_menu_bar
 from jevosx.types import AppInfo
 from tests.fakes import FakeNode
@@ -107,3 +107,14 @@ def test_pick_frontmost_from_window_list():
     ]  # fmt: skip
     assert pick_frontmost(windows, exclude={77}) == 12
     assert pick_frontmost([], exclude=set()) is None
+
+
+def test_choose_frontmost_trusts_workspace_for_an_active_app_without_windows():
+    """Seen live: TextEdit was frontmost with no document open, the window list said Finder, OPEN_APP kept failing."""
+    finder = {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 20, "kCGWindowBounds": {"Width": 900, "Height": 600}}
+    notes = {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 30, "kCGWindowBounds": {"Width": 900, "Height": 600}}
+    assert choose_frontmost([finder, notes], active=40) == 40  # TextEdit, active and windowless
+    assert choose_frontmost([finder, notes], active=30) == 20  # active app has a window: the list's order wins
+    assert choose_frontmost([finder, notes], active=None) == 20
+    assert choose_frontmost([finder], active=77, exclude={77}) == 20  # never ourselves
+    assert choose_frontmost([], active=40) == 40

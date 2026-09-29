@@ -58,32 +58,56 @@ def app_for_pid(pid: int) -> AppInfo:  # pragma: no cover - macOS only
     return AppInfo(name=f"pid {pid}", pid=pid)
 
 
+def _normal_window_pid(window: Any, exclude: set[int] | frozenset[int]) -> int | None:
+    """Owner pid of a normal app window (layer 0, visible, not tiny), else None."""
+    pid = window.get("kCGWindowOwnerPID")
+    bounds = window.get("kCGWindowBounds") or {}
+    if (
+        window.get("kCGWindowLayer", 0) != 0
+        or not pid
+        or int(pid) in exclude
+        or window.get("kCGWindowAlpha", 1) == 0
+        or window.get("kCGWindowOwnerName") in ("Window Server", "Dock")
+        or (bounds and (bounds.get("Width", 0) < 50 or bounds.get("Height", 0) < 50))
+    ):
+        return None
+    return int(pid)
+
+
 def pick_frontmost(windows: Iterable[Any], exclude: set[int] | frozenset[int] = frozenset()) -> int | None:
     """Owner pid of the frontmost normal window in a CGWindowList (front-to-back order). Pure, so it is testable."""
     for window in windows:
-        pid = window.get("kCGWindowOwnerPID")
-        bounds = window.get("kCGWindowBounds") or {}
-        if (
-            window.get("kCGWindowLayer", 0) != 0
-            or not pid
-            or int(pid) in exclude
-            or window.get("kCGWindowAlpha", 1) == 0
-            or window.get("kCGWindowOwnerName") in ("Window Server", "Dock")
-            or (bounds and (bounds.get("Width", 0) < 50 or bounds.get("Height", 0) < 50))
-        ):
-            continue
-        return int(pid)
+        pid = _normal_window_pid(window, exclude)
+        if pid is not None:
+            return pid
     return None
+
+
+def choose_frontmost(
+    windows: list[Any], active: int | None, exclude: set[int] | frozenset[int] = frozenset()
+) -> int | None:
+    """Frontmost app when Accessibility cannot say. The window list is trusted first, but it cannot see an active app
+    that has no window (TextEdit after its last document closed): if NSWorkspace names such an app, it is in front."""
+    listed = pick_frontmost(windows, exclude)
+    if active is not None and active != listed and active not in exclude:
+        windowed = {pid for pid in (_normal_window_pid(w, exclude) for w in windows) if pid is not None}
+        if active not in windowed:
+            return active
+    return listed
+
+
+def onscreen_windows() -> list[Any]:  # pragma: no cover - macOS only
+    try:
+        import Quartz
+    except ImportError:
+        return []
+    options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+    return list(Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or [])
 
 
 def frontmost_from_window_list(exclude: set[int] | frozenset[int] = frozenset()) -> int | None:  # pragma: no cover
     """Fallback that needs neither Accessibility nor Screen Recording (owner pids are always visible)."""
-    try:
-        import Quartz
-    except ImportError:
-        return None
-    options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
-    return pick_frontmost(Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or [], exclude)
+    return pick_frontmost(onscreen_windows(), exclude)
 
 
 def frontmost_from_workspace() -> int | None:  # pragma: no cover - macOS only

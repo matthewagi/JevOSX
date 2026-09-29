@@ -249,6 +249,9 @@ to save and how many before starting.
   loaded; it was saved at 246×164 (6 KB), and the same photo again at full size once the tile had become a gstatic
   thumbnail. Inline pictures on Google's results count as thumbnails now, so their original is fetched too and
   the rebuilt tile is recognized as already saved.
+- Seen live ("save 2 pictures of red tulips"): done in 3 steps into ~/Pictures/Red Tulips, 540×360 from Adobe Stock
+  (the largest it serves) and 3000×4494 from Unsplash, but named "red tulips 1.jpg" and "red tulips 1.webp".
+  Files are now numbered by name whatever their type.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

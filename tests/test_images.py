@@ -569,3 +569,11 @@ def test_waits_for_the_results_to_be_rebuilt_after_a_save(tmp_path, monkeypatch)
     result = agent.run(GOAL, max_steps=6)
     assert result.status == "done" and result.steps == 3 and asked == []
     assert desktop.executed == [e for e in desktop.executed if e.startswith("CLICK [") and "image" in e]
+
+
+def test_files_are_numbered_by_name_whatever_their_type(tmp_path):
+    """Seen live: a JPEG and a WebP were saved as "red tulips 1.jpg" and "red tulips 1.webp"."""
+    webp = b"RIFF\x00\x00\x00\x00WEBPVP8 "
+    ImageSaver(client(lambda r: httpx.Response(200, content=PNG))).save("https://a.example/1", tmp_path, "red tulips")
+    ImageSaver(client(lambda r: httpx.Response(200, content=webp))).save("https://a.example/2", tmp_path, "red tulips")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["red tulips 1.png", "red tulips 2.webp"]

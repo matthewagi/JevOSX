@@ -22,6 +22,7 @@ import binascii
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote_plus, unquote, urlsplit
@@ -368,9 +369,9 @@ def _sniff(data: bytes) -> str | None:
 
 
 def _free_path(folder: Path, stem: str, extension: str) -> Path:
-    for n in range(1, 10_000):
+    for n in range(1, 10_000):  # numbered by name only: "red tulips 1.jpg" and "red tulips 2.webp", not two 1s
         path = folder / f"{stem} {n}{extension}"
-        if not path.exists():
+        if not path.exists() and not any(folder.glob(f"{glob_escape(stem)} {n}.*")):
             return path
     raise ImageSaveError(f"too many files named {stem} in {display_path(folder)}")
 

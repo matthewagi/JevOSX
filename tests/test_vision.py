@@ -136,6 +136,7 @@ def test_executor_clicks_the_centre_of_recognized_text_and_types_at_the_cursor(m
     executor.settings = ExecutorSettings()
     visual, _ = visual_elements([box("Play", 0.5, 0.25, 0.1, 0.05)], WINDOW)
     obs = observation(visual)
+    executor._frontmost_pid = lambda: obs.app.pid  # the game window is in front
     result = executor.execute(Action(CLICK, element=visual[0]), obs)
     assert result.ok and result.method == "pointer" and clicks == [(540.0, 215.0)]
     keys = keyboard_element(2)

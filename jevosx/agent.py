@@ -2,6 +2,11 @@
 
 One Jev request per decision. Every executed target was observed on this Mac, re-validated immediately before
 input, and logged to local memory. Episode outcomes feed back into retrieval, so repeated tasks get better hints.
+
+Working behind you (agent.background): once an action of the agent's own has put a window in front (a new browser
+window, an app it opened), that window becomes its work window. It keeps reading that window wherever it is, so you
+can go back to the console or Terminal. Clicks and field writes reach it through Accessibility in the background;
+key presses bring it forward briefly, and then the window you were using is brought back.
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ import time
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from .config import Settings
 from .errors import (
@@ -23,12 +28,12 @@ from .errors import (
     StaleElementError,
     TextUnavailableError,
 )
-from .executor.base import DryRunExecutor, Executor
+from .executor.base import DryRunExecutor, Executor, WindowFocuser
 from .executor.safety import SafetyPolicy
 from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
-from .observer.base import Observer
+from .observer.base import BackgroundObserver, Observer, WindowRef
 from .planner import GoalReading, Planner, merge_slots
 from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal, template_slots
@@ -185,6 +190,7 @@ class Agent:
         self.last_observation: Observation | None = None
         self._sensitive: list[str] = []  # saved-login usernames on screen: masked in events, memory and logs
         self.last_plan: list[str] = []
+        self.work: WindowRef | None = None  # the agent's own work window (agent.background)
 
     @classmethod
     def from_settings(
@@ -282,11 +288,17 @@ class Agent:
             self._log(event)
             return event
 
+        self.work = None
+        behind = self.works_behind
         try:
             if reading.steps or reading.values:
                 yield emit(StepEvent(step=0, status="plan", action="PLAN", message=reading.summary()))
             if app:
+                before = self._front() if behind else None
                 result = self._open_requested_app(app)
+                if behind:
+                    requested = self.observer.find_app(app)
+                    self._after_action(before, acted_pid=requested.pid if requested else None, known=None)
                 history.append({"step": 0, "action": f"OPEN_APP {app} (requested)", "result": result.detail or "ok"})
                 if not result.ok:
                     status, message = "error", f"could not open {app}: {result.detail}"
@@ -297,7 +309,7 @@ class Agent:
                     break
                 t0 = self.clock()
                 try:
-                    obs = self.observer.observe()
+                    obs = self._observe(behind)
                     self.last_observation = obs
                 except StaleElementError as exc:
                     stale += 1
@@ -411,6 +423,8 @@ class Agent:
                     history.append(entry)
                     step_id = self._record(episode_id, steps, obs, decision, outcome="pending")
                     yield emit(event)
+                    if behind and self.work is not None:
+                        cast(WindowFocuser, self.executor).bring_forward(self.work)  # the person acts in it
                     if not self.handoff(f"{need} ({where})", obs):
                         entry["result"] = "the user stopped the run"
                         status, message = "aborted", "stopped by you during a hand-off"
@@ -490,10 +504,16 @@ class Agent:
                 stale = 0
 
                 t4 = self.clock()
+                before = self._front() if behind else None
                 result = self.executor.execute(action, obs)
                 t5 = self.clock()
                 if result.ok and action.operation != OPEN_APP:
                     self._settle()
+                if behind:
+                    if op == FOCUS_WINDOW and result.ok and action.window is not None and obs.app.pid is not None:
+                        self.work = WindowRef(obs.app.pid, action.window.node, action.window.title)
+                    acted_pid = action.app.pid if op == OPEN_APP and action.app is not None else obs.app.pid
+                    self._after_action(before, acted_pid=acted_pid, known={a.pid for a in obs.running_apps})
                 t6 = self.clock()
                 steps += 1
                 entry = {
@@ -635,6 +655,55 @@ class Agent:
         self.close()
 
     # ------------------------------------------------------------------------------------------------------------
+    @property
+    def works_behind(self) -> bool:
+        return (
+            self.settings.agent.background
+            and isinstance(self.observer, BackgroundObserver)
+            and isinstance(self.executor, WindowFocuser)
+        )
+
+    def _front(self) -> WindowRef | None:
+        try:
+            return cast(BackgroundObserver, self.observer).front()
+        except StaleElementError:
+            return None
+
+    def _observe(self, behind: bool) -> Observation:
+        if not behind or self.work is None:
+            return self.observer.observe()
+        try:
+            obs = cast(BackgroundObserver, self.observer).observe_window(self.work)
+        except StaleElementError as exc:
+            log.info("%s; reading the front window again", exc)
+            self.work = None
+            return self.observer.observe()
+        window = obs.window
+        pin = self.work.window is None and window is not None and window.node is not None
+        if pin and window is not None and not is_console_window(window.title):  # the app's window that was read
+            self.work = WindowRef(self.work.pid, window.node, window.title)
+        return obs
+
+    def _after_action(self, before: WindowRef | None, *, acted_pid: int | None, known: set[int | None] | None) -> None:
+        """Follow the agent's own window changes, then give the keyboard back to where the person was.
+
+        The window in front after an action becomes the work window only when the action put it there: a window of
+        the app the agent acted in (a new browser window), or an app the action launched. A switch the person makes to
+        an app that was already running stays theirs, and the console window is never work. When nothing new came
+        forward, the app the agent acted in is its work (whichever of its windows it has focused)."""
+        after = self._front()
+        if after is None or before is None:
+            return
+        watching = self.work is not None and before.same(self.work)
+        moved = not after.same(before)
+        ours = after.pid == acted_pid or (known is not None and after.pid not in known)
+        if moved and ours and not after.console:
+            self.work = after
+        elif self.work is None and acted_pid is not None:
+            self.work = WindowRef(acted_pid)
+        if moved and not watching and self.work is not None and self.work.same(after):  # only a window it put there
+            cast(WindowFocuser, self.executor).bring_forward(before)
+
     def _open_requested_app(self, query: str) -> ActionResult:
         target = self.observer.find_app(query)
         if target is None:
@@ -687,10 +756,16 @@ class Agent:
         """Wait until a cheap UI signature stops changing (bounded), so the next observation is not mid-animation."""
         cfg = self.settings.executor
         deadline = self.clock() + cfg.settle_timeout_s
-        previous = self.observer.quick_signature()
+        work = self.work if self.works_behind else None
+        signature = (
+            (lambda: cast(BackgroundObserver, self.observer).quick_signature_of(work))
+            if work is not None
+            else self.observer.quick_signature
+        )
+        previous = signature()
         while self.clock() < deadline:
             self.sleep(cfg.settle_poll_s)
-            current = self.observer.quick_signature()
+            current = signature()
             if current == previous:
                 return
             previous = current

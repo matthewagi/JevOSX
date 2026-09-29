@@ -213,6 +213,24 @@ def own_label(attrs: dict[str, Any], *, text_input: bool) -> str:
     return ""
 
 
+def dedupe(elements: list[UIElement]) -> list[UIElement]:
+    """Drop controls that the tree lists twice: same role, label and on-screen frame. Chrome exposes its toolbar under
+    two parents, and two identical address bars split Jev's choice between them. Renumbers the rest."""
+    seen: set[tuple[Any, ...]] = set()
+    kept: list[UIElement] = []
+    for element in elements:
+        frame = element.frame
+        if frame is not None and not frame.empty:
+            key = (element.role, element.subrole, element.label, round(frame.x), round(frame.y), round(frame.w))
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(element)
+    for index, element in enumerate(kept, start=1):
+        element.index = index
+    return kept
+
+
 class TreeWalker:
     def __init__(self, limits: WalkLimits | None = None, clock: Callable[[], float] = time.perf_counter):
         self.limits = limits or WalkLimits()
@@ -400,6 +418,7 @@ class TreeWalker:
         for element in elements:
             if not element.label:
                 element.label = element.role_name
+        elements = dedupe(elements)
         for area in scroll_areas:
             if not area.label:
                 area.label = area.container or "content"

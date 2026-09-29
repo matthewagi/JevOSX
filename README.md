@@ -307,6 +307,22 @@ A chat-style console for giving the agent commands:
 - **Security.** It listens on 127.0.0.1 only. Every API call needs a per-session token, and requests with a
   foreign `Host` are rejected, so other web pages can't drive your Mac through it.
 
+**It works behind your window** (`agent.background = true`, the default). When one of the agent's own actions puts
+a window in front (a new browser window, an app it opened), that window becomes its work window. From then on the
+agent reads that window wherever it is, so you can keep the console or Terminal in front while it works:
+
+- Clicks and field writes go through Accessibility and reach the work window without bringing it forward.
+- Key presses, menu commands and typing into browsers need the keyboard. For those the work window comes forward
+  for a moment. JevOSX checks that it really is the key window before sending anything, and then brings back the
+  window you were using. If it cannot bring the window forward, nothing is sent.
+- A window you switch to yourself never becomes work, and the console window never does either. Clicking Allow in
+  the console no longer sends the next keystrokes to the console.
+- For a "Your turn" hand-off, the work window is brought forward so you can do your part.
+
+macOS has no public way to give the agent a desktop of its own, so a work window that needs typing still flashes
+forward briefly. Put the console beside the browser, or on another display, to watch both. Set
+`background = false` to have the agent work in front, as before.
+
 Demo mode simulates Finder, TextEdit, Safari and Notes, with a transparent keyword policy standing in for Jev.
 The router contract, confidence gate, safety approvals, memory and streaming are the real code, so it behaves
 exactly like a live run apart from who makes the decisions. The example cards cover a multi-step task, a web
@@ -518,8 +534,9 @@ If none of these is available, `TYPE_TEXT` is not offered at all.
   Icon-only buttons, drag-and-drop, drawing and real-time games are out of reach for now (see the roadmap). The
   opt-in `executor.pointer_fallback` clicks an element's own AX frame centre, but it still needs the element to
   exist.
-- The observer walks the focused window (including attached sheets) plus open menus. Other windows are reachable
-  through `FOCUS_WINDOW`.
+- The observer walks one window, the agent's work window (including attached sheets), plus open menus. Other
+  windows are reachable through `FOCUS_WINDOW`. A window that an action opens in another, already running app is
+  not followed automatically; the agent switches to that app with `OPEN_APP`.
 - Secure input (password prompts, some banking apps) can block synthetic keystrokes system-wide.
 - Some cross-app menus are populated lazily and can be stale for up to `menu_cache_ttl_s`. Pressing a menu item
   that has become disabled fails safely and shows up as a failed step.

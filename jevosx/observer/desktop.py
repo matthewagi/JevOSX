@@ -14,6 +14,7 @@ from ..errors import StaleElementError
 from ..types import AppInfo, Observation, UIElement, WindowInfo, clean_text, is_console_window
 from . import apps as appmod
 from .ax import AX_SUCCESS, AXNode, require_ax
+from .base import WindowRef
 from .menus import walk_menu_bar
 from .vision import VisionReader, keyboard_element, needs_vision, visual_elements
 from .walker import TreeWalker, WalkLimits
@@ -95,13 +96,29 @@ class MacDesktopObserver:
     def find_app(self, query: str) -> AppInfo | None:
         return appmod.find_app(query, appmod.merge_apps(appmod.running_apps(), self.installed_apps()))
 
-    def quick_signature(self) -> str:
+    def front(self) -> WindowRef | None:
+        """The frontmost app and its focused window (where key presses would go)."""
         pid = self.frontmost_pid()
         if pid is None:
-            return "none"
+            return None
+        try:
+            window = self.app_node(pid).get("AXFocusedWindow") or self.app_node(pid).get("AXMainWindow")
+            title = clean_text(window.get("AXTitle"), 100) if window is not None else ""
+        except StaleElementError:
+            return WindowRef(pid)
+        return WindowRef(pid, window, title)
+
+    def quick_signature(self) -> str:
+        pid = self.frontmost_pid()
+        return "none" if pid is None else self._signature(pid, None)
+
+    def quick_signature_of(self, target: WindowRef) -> str:
+        return self._signature(target.pid, target.window)
+
+    def _signature(self, pid: int, window: Any | None) -> str:
         try:
             node = self.app_node(pid)
-            window = node.get("AXFocusedWindow")
+            window = window if window is not None else node.get("AXFocusedWindow")
             focused = node.get("AXFocusedUIElement")
             parts = [str(pid)]
             if window is not None:
@@ -113,8 +130,20 @@ class MacDesktopObserver:
         except StaleElementError:
             return f"{pid}|stale"
 
-    def observe(self, pid: int | None = None) -> Observation:
-        """Observe the frontmost app, or the app with `pid` (e.g. for diagnostics while another app is in front)."""
+    def observe_window(self, target: WindowRef) -> Observation:
+        """Observe the agent's work window, in front or not (reading the accessibility tree needs no focus)."""
+        if target.window is not None:
+            try:
+                alive = target.window.get("AXRole") is not None
+            except StaleElementError:
+                alive = False
+            if not alive:
+                raise StaleElementError(f"the work window “{target.title}” is gone")
+        return self.observe(target.pid, window=target.window)
+
+    def observe(self, pid: int | None = None, *, window: Any | None = None) -> Observation:
+        """Observe the frontmost app, or the app with `pid` (e.g. for diagnostics while another app is in front);
+        its focused window, or `window` when given."""
         started = time.perf_counter()
         how = "requested"
         if pid is None:
@@ -125,7 +154,7 @@ class MacDesktopObserver:
         node = self.app_node(pid)
         self.enable_web_accessibility(pid, app, node)
 
-        windows, focused_window = self._windows(node)
+        windows, focused_window = self._windows(node, window)
         # The window's own frame becomes the visibility clip for its subtree (see TreeWalker).
         roots: list[tuple[Any, str | None]] = []
         if focused_window is not None and focused_window.node is not None:
@@ -206,9 +235,9 @@ class MacDesktopObserver:
         stats["elements"] = len(visual)
         return combined, (text + "\n" + seen_text).strip(), stats
 
-    def _windows(self, node: AXNode) -> tuple[list[WindowInfo], WindowInfo | None]:
+    def _windows(self, node: AXNode, wanted: Any | None = None) -> tuple[list[WindowInfo], WindowInfo | None]:
         try:
-            focused = node.get("AXFocusedWindow") or node.get("AXMainWindow")
+            focused = wanted if wanted is not None else node.get("AXFocusedWindow") or node.get("AXMainWindow")
             raw = node.children("AXWindows")
         except StaleElementError:
             return [], None
@@ -220,9 +249,12 @@ class MacDesktopObserver:
             except StaleElementError:
                 continue
             is_focused = focused is not None and window == focused
+            title = clean_text(attrs.get("AXTitle"), 100)
+            if not title and not is_focused and attrs.get("AXSubrole") not in ("AXStandardWindow", "AXDialog"):
+                continue  # untitled helper windows (Chrome's bubbles and popups) are not places to switch to
             info = WindowInfo(
                 index=position,
-                title=clean_text(attrs.get("AXTitle"), 100) or "(untitled)",
+                title=title or "(untitled)",
                 focused=is_focused,
                 minimized=attrs.get("AXMinimized") is True,
                 node=window,

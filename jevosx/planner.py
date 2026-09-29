@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 
 from .errors import JevOSXError, TextUnavailableError
 from .router.text import SECRET_NAME
-from .types import clean_text
 from .writer.base import TextWriter
 
 log = logging.getLogger("jevosx.planner")
@@ -172,11 +171,45 @@ class Planner:
         return self.read(goal).steps if needs_plan(goal) else []
 
 
+_ADDRESS = re.compile(r"(?:https?://)?(?:www\.)?(?P<site>(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?)", re.IGNORECASE)
+
+
+def _address(value: str) -> str | None:
+    """ "https://www.facebook.com/marketplace/" → "facebook.com/marketplace"; None when it is not an address."""
+    match = _ADDRESS.fullmatch(value.strip())
+    return match.group("site").lower().rstrip("/") if match else None
+
+
 def merge_slots(model: dict[str, str], patterns: dict[str, str]) -> dict[str, str]:
-    """The model's values first; pattern-based slots only add what the model did not already cover."""
+    """The model's values first; pattern-based slots only add what the model did not already cover.
+
+    Near-identical text ("population of Malta" / "the population of Malta") and two addresses on the same site where
+    one leads further ("facebook.com/marketplace" / "facebook.com/marketplace/create/item") count as covered: the
+    more specific address is kept, under the model's name. Offering both would split Jev's choice between them and
+    leave neither sure enough to type."""
     merged = dict(model)
-    known = {clean_text(v, 2000).lower() for v in model.values()}
     for name, value in patterns.items():
-        if name not in merged and clean_text(value, 2000).lower() not in known:
+        if name in merged or any(_same_text(value, other) for other in merged.values()):
+            continue
+        address = _address(value)
+        related = [other for other, text in merged.items() if address and _same_site(address, _address(text))]
+        if not related:
             merged[name] = value
+        for other in related:
+            if address and address.startswith(f"{_address(merged[other])}/"):
+                merged[other] = value  # the pattern's address goes further on the same site
     return merged
+
+
+_ARTICLES = frozenset({"a", "an", "the"})
+
+
+def _same_text(a: str, b: str) -> bool:
+    def words(text: str) -> list[str]:
+        return [w for w in re.findall(r"\w+", text.lower()) if w not in _ARTICLES]
+
+    return words(a) == words(b)
+
+
+def _same_site(a: str, b: str | None) -> bool:
+    return b is not None and (a == b or a.startswith(b + "/") or b.startswith(a + "/"))

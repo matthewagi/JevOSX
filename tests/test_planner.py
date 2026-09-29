@@ -163,3 +163,21 @@ def test_without_a_writer_a_listing_still_gets_plain_filler_text():
     assert template_slots("sell my bike for 50 euros", {"title": "Bike"}) == {}  # no filler text asked for
     assert template_slots(FB_GOAL, {"title": "Bike", "description": "mine"}) == {}  # never replaces a real one
     assert template_slots("write a description of the Eiffel Tower", {}) == {}  # not a listing
+
+
+@pytest.mark.parametrize(
+    ("model", "patterns", "expected"),
+    [
+        (  # the model read the site, the patterns know the new-listing page: one address, the more specific
+            {"website": "facebook.com/marketplace", "title": "Plastic welding gun"},
+            {"url_1": "facebook.com/marketplace/create/item", "title": "Plastic welding gun", "price": "40"},
+            {"website": "facebook.com/marketplace/create/item", "title": "Plastic welding gun", "price": "40"},
+        ),
+        ({"website": "facebook.com/groups/abc"}, {"url_1": "facebook.com"}, {"website": "facebook.com/groups/abc"}),
+        ({"website": "amazon.com"}, {"url_1": "ebay.com"}, {"website": "amazon.com", "url_1": "ebay.com"}),
+        ({"search": "population of Malta"}, {"phrase_1": "the population of Malta"}, {"search": "population of Malta"}),
+        ({"price": "40.5"}, {"url_1": "40.5.com"}, {"price": "40.5", "url_1": "40.5.com"}),  # a number is no address
+    ],
+)
+def test_one_destination_is_offered_once(model, patterns, expected):
+    assert merge_slots(model, patterns) == expected

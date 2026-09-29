@@ -90,6 +90,7 @@ class ExecutorSettings:
     launch_timeout_s: float = 8.0
     key_delay_s: float = 0.006
     scroll_page_fraction: float = 0.8
+    focus_timeout_s: float = 1.5  # how long to wait for a window to come forward before keys are sent to it
 
 
 @dataclass
@@ -159,6 +160,10 @@ class AgentSettings:
     max_done_rejections: int = 2
     max_handoffs: int = 3  # ASK_USER hand-offs (2FA codes, CAPTCHAs…) per run
     plan: str = "auto"  # auto: the writer's model reads the goal once per run (steps + values to type) | off
+    # Work behind your window: the agent keeps its own work window and reads it where it is. Clicks and field writes
+    # go through Accessibility without bringing it forward; for key presses it comes forward briefly, and then
+    # whatever you were using (the console, Terminal…) is brought back. false: the agent works in front, as before.
+    background: bool = True
 
 
 @dataclass

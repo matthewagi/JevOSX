@@ -46,6 +46,7 @@ wait_s = 0.6
 launch_timeout_s = 8.0
 key_delay_s = 0.006
 scroll_page_fraction = 0.8
+focus_timeout_s = 1.5              # wait this long for the work window to come forward before keys are sent
 
 [memory]
 enabled = true
@@ -80,6 +81,7 @@ history_size = 8
 max_done_rejections = 2
 max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
 plan = "auto"                      # auto: the writer's model reads the request once: steps + values to type | off
+background = true                  # work behind your window: keys borrow the work window briefly, then yours returns
 
 [writer]
 # Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).

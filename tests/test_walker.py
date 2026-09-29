@@ -187,3 +187,23 @@ def test_unclipped_rewalk_when_everything_looked_offscreen():
     result = TreeWalker().walk([(window(web), None)])
     assert [e.label for e in result.elements] == ["Only link"]
     assert any("unclipped re-walk" in note for note in result.notes)
+
+
+def test_controls_listed_twice_by_the_tree_are_offered_once():
+    def toolbar():  # Chrome lists its toolbar under two parents: the same controls, the same place on screen
+        return FakeNode(
+            "AXToolbar",
+            frame=(0, 0, 800, 40),
+            children=[
+                FakeNode("AXButton", Title="Reload", frame=(80, 5, 30, 30)),
+                FakeNode(
+                    "AXTextField", Description="Address and search bar", settable=["AXValue"], frame=(120, 8, 600, 24)
+                ),
+            ],
+        )
+
+    page = FakeNode("AXButton", Title="Reload", frame=(300, 300, 80, 30))  # same label elsewhere: a different control
+    root = window(FakeNode("AXGroup", children=[toolbar()]), FakeNode("AXGroup", children=[toolbar()]), page)
+    result = TreeWalker().walk([(root, None)])
+    labels = [(e.index, e.label) for e in result.elements]
+    assert labels == [(1, "Reload"), (2, "Address and search bar"), (3, "Reload")]

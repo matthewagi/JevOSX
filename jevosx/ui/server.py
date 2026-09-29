@@ -385,6 +385,7 @@ class RunManager:
                 "min_confidence": self.settings.agent.min_confidence,
                 "low_confidence_policy": self.settings.agent.console_low_confidence_policy,
                 "max_steps": self.settings.agent.max_steps,
+                "background": self.settings.agent.background,
             },
             "running": self.running,
             "stale": stale,

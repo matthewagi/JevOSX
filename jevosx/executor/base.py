@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
+from ..observer.base import WindowRef
 from ..types import Action, ActionResult, AppInfo, Observation
 
 
@@ -15,6 +16,13 @@ class Executor(Protocol):
     def execute(self, action: Action, obs: Observation) -> ActionResult: ...
 
     def open_app(self, app: AppInfo) -> ActionResult: ...
+
+
+@runtime_checkable
+class WindowFocuser(Protocol):
+    def bring_forward(self, target: WindowRef) -> bool:
+        """Make the window the key window of the frontmost app. True once it is."""
+        ...
 
 
 class DryRunExecutor:

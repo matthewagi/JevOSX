@@ -112,6 +112,25 @@ model output coordinates, commands or passwords.
   sees as `to`. Probability spread over links to the chosen page counts as one choice.
 - **Handoff.** `ASK_USER` (see Phase 2) works for any app, not only logins.
 
+## Phase 5: working behind your window (done)
+
+Seen live: approving a step in the console brought the console window to the front, and the approved typing then
+went to the console instead of the new Facebook window. The run failed and kept switching windows.
+
+- **A work window of its own.** The agent keeps the window its own actions brought forward and reads it where it
+  is (Accessibility needs no focus). A window the person switches to is never adopted, and neither is the console.
+- **Keys only where they belong.** Key presses, menu commands and browser typing bring the work window forward and
+  check that it is the key window before anything is sent; otherwise nothing is sent. Afterwards the person's
+  window comes back. `agent.background = true | false`.
+- **One destination, one choice.** The model's "facebook.com/marketplace" and the pattern's
+  "facebook.com/marketplace/create/item" were offered side by side and split Jev's text choice (0.48). Only the more
+  specific address is kept now. Chrome also lists its toolbar twice, which gave two identical address bars. Controls
+  with the same role, label and frame are offered once.
+- **Research: a desktop of its own.** macOS has no public API for a hidden Space or a virtual display
+  (`CGVirtualDisplay` is private), so typing still shows the work window for a moment. Candidates: per-process key
+  events (`CGEventPostToPid`, unreliable in Chromium), and AppleScript navigation for browsers (`set URL of active
+  tab`, which needs the Automation permission).
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

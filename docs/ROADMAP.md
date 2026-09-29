@@ -297,6 +297,13 @@ to save and how many before starting.
 - Seen live ("save 4 photos of sunsets in Gozo to a folder called gozo on my desktop", 14:26): the topic stopped at
   "in", so it searched "sunsets" and saved sunsets from the US and elsewhere. "in"/"on" now end the topic only before
   a place to save ("in a folder", "on my desktop", "in ~/…"): the topic is "sunsets in Gozo".
+- Seen live (5 of 6 fresh-window browser runs, 29 September; reproduced at 15:33): the first TYPE_TEXT into a fresh
+  Chrome window's address bar reported "typed text did not appear", and only the retry worked (the text was already
+  there by then). Focus was fine: the address bar was the focused element before and after. The key events are
+  delivered asynchronously, and a probe read "" just after the last key and the full text 30 ms later, which is
+  exactly when the one read-back happened. The read-back now polls (`settle_poll_s`) for up to `settle_timeout_s`.
+  The same probe found that reading a text range (AXSelectedTextRange) crashed, because PyObjC returned a plain
+  tuple; nothing read ranges yet, and it is fixed.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

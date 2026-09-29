@@ -17,7 +17,7 @@ from jevosx.observer.vision import (
 )
 from jevosx.router.policy import build_state
 from jevosx.types import CLICK, TYPE_TEXT, Action, Rect
-from tests.fakes import element, observation
+from tests.fakes import FakeNode, element, observation
 
 WINDOW = Rect(100, 50, 800, 600)
 
@@ -144,6 +144,35 @@ def test_executor_clicks_the_centre_of_recognized_text_and_types_at_the_cursor(m
     assert executor.execute(Action(TYPE_TEXT, element=keys, text="hello"), obs).ok and typed == ["hello"]
     secret = Action(TYPE_TEXT, element=keys, text="hunter2", text_is_secret=True)
     assert not executor.execute(secret, obs).ok and typed == ["hello"]
+
+
+def test_typed_text_that_shows_up_late_in_the_field_counts_as_typed(monkeypatch):
+    """Seen live: a fresh Chrome window's address bar held the typed text only ~30 ms after the last key event."""
+    from jevosx.config import ExecutorSettings
+    from jevosx.executor import input as keyboard
+
+    class LateField(FakeNode):
+        reads = 0
+
+        def get(self, attribute, default=None):
+            if attribute == "AXValue":
+                self.reads += 1
+                return "population of Gozo" if self.reads > 2 else ""
+            return super().get(attribute, default)
+
+    monkeypatch.setattr(keyboard, "post_chord", lambda chord, delay_s=0: None)
+    monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: None)
+    executor = object.__new__(MacExecutor)
+    executor.settings = ExecutorSettings(settle_poll_s=0.001, settle_timeout_s=0.5)
+    field = element(1, "AXTextField", "Address and search bar", ops=("TYPE_TEXT",), in_web_area=False,
+                    node=LateField("AXTextField"))  # fmt: skip
+    obs = observation([field])
+    executor._frontmost_pid = lambda: obs.app.pid
+    result = executor._type(field, "population of Gozo", obs, secret=False, prefer_keys=True)
+    assert result.ok and result.method == "keystrokes" and field.node.reads == 3
+    executor.settings = ExecutorSettings(settle_poll_s=0.001, settle_timeout_s=0.01)
+    never = element(2, "AXTextField", "Search", ops=("TYPE_TEXT",), node=FakeNode("AXTextField", Value=""))
+    assert not executor._type(never, "Gozo", obs, secret=False, prefer_keys=True).ok  # it never showed up
 
 
 @pytest.mark.parametrize("mode", ["auto", "always", "off"])

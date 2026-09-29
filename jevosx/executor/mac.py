@@ -245,11 +245,21 @@ class MacExecutor:
         keyboard.type_text(text, delay_s=self.settings.key_delay_s)
         if secret or element.secure:
             return ActionResult(True, "keystrokes", "secure field: value not read back")
-        time.sleep(0.03)
-        current = str(node.get("AXValue") or "")
-        if text.strip() and text.strip() not in current:
+        if text.strip() and not self._text_appears(node, text.strip()):
             return ActionResult(False, "keystrokes", "typed text did not appear in the field")
         return ActionResult(True, "keystrokes")
+
+    def _text_appears(self, node: Any, text: str) -> bool:
+        """Wait for posted keystrokes to show up in the field's AXValue. Key events are delivered asynchronously: seen
+        live, a fresh Chrome window's address bar still read "" just after the last key and held the text ~30 ms later,
+        so a single early read-back reported a failure and the agent lost a step typing it again."""
+        started = time.monotonic()
+        while True:
+            time.sleep(self.settings.settle_poll_s)
+            if text in str(node.get("AXValue") or ""):
+                return True
+            if time.monotonic() - started >= self.settings.settle_timeout_s:
+                return False
 
     def _scroll(self, element: UIElement, obs: Observation, *, down: bool) -> ActionResult:
         node = element.node

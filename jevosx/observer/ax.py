@@ -208,5 +208,6 @@ def _axvalue(value: Any) -> Any:
     if kind == _AS.kAXValueCGRectType:
         return (float(struct.origin.x), float(struct.origin.y), float(struct.size.width), float(struct.size.height))
     if kind == _AS.kAXValueCFRangeType:
-        return (int(struct.location), int(struct.length))
+        location, length = struct  # PyObjC hands a CFRange back as a struct or, seen live, a plain tuple
+        return (int(location), int(length))
     return None

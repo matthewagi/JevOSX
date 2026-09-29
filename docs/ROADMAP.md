@@ -245,6 +245,10 @@ to save and how many before starting.
   rebuilt them after a tile was pressed, had only the page's header (40 elements instead of about 108), and Jev
   clicked "Search" and "Search by image". A source page with no unsaved picture and nothing to scroll is now read
   again (up to 10 times) instead of being judged.
+- Seen live (sixth run): 4 steps in 7 s, but the first tile was still an inline data: picture while the results
+  loaded; it was saved at 246×164 (6 KB), and the same photo again at full size once the tile had become a gstatic
+  thumbnail. Inline pictures on Google's results count as thumbnails now, so their original is fetched too and
+  the rebuilt tile is recognized as already saved.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

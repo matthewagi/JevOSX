@@ -489,6 +489,32 @@ def test_original_of_reads_the_preview_and_the_imgres_link():
         == "https://a.example/1.jpg"
     )
     assert imgres_target("https://example.com/imgres?imgurl=x") is None
+    results = "https://www.google.com/search?q=dogs&udm=2"
+    assert is_thumbnail("data:image/jpeg;base64,/9j/AAAA", results)
+    assert not is_thumbnail("data:image/jpeg;base64,/9j/AAAA", "https://unsplash.com/s/photos/dog")
+
+
+def test_an_inline_first_tile_is_pressed_and_not_saved_twice(tmp_path, monkeypatch):
+    """Seen live: the first tile was still an inline data: picture; it was saved at 246 by 164 pixels, and the same
+    photo again at full size once the tile had become a gstatic thumbnail."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    class Loading(GoogleResults):
+        def observe(self):
+            obs = super().observe()
+            first = obs.elements[0]
+            if self.open is None:
+                first.url = "data:image/jpeg;base64," + base64.b64encode(PNG).decode()
+            return obs
+
+    def serve(request):
+        downloads.append(str(request.url))
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    result = google_agent(Loading(), serve).run(GOAL, max_steps=6)
+    assert result.status == "done"
+    assert downloads == [f"https://site.example/{i}.jpg" for i in range(3)]
 
 
 def test_waits_for_the_picture_results_to_load_without_asking_jev(tmp_path, monkeypatch):

@@ -241,8 +241,12 @@ def page_key(url: str | None) -> str:
     return (url or "").split("#", 1)[0]
 
 
-def is_thumbnail(url: str | None) -> bool:
-    """Google's small copy of a picture on its results (encrypted-tbn0.gstatic.com, about 500 pixels wide)."""
+def is_thumbnail(url: str | None, page_url: str | None = None) -> bool:
+    """Google's small copy of a picture on its results: encrypted-tbn0.gstatic.com (about 500 pixels wide), or,
+    for the first tiles while the page loads, an inline data: picture (seen live: 246 by 164 pixels)."""
+    if (url or "").startswith("data:"):
+        page = urlsplit(page_url or "")
+        return page.netloc.lower().startswith(("www.google.", "google.")) and page.path == "/search"
     return bool(re.fullmatch(r"encrypted-tbn\d*\.gstatic\.com", urlsplit(url or "").netloc.lower()))
 
 

@@ -864,7 +864,9 @@ class Agent:
         task.saved_urls.add(url)  # tried: never offered again, whether it saves or not
         if isinstance(self.executor, DryRunExecutor):
             return True, f"dry run: would save it into {display_path(task.folder)}"
-        original = self._original(element, obs, task) if element is not None and is_thumbnail(url) else None
+        original = (
+            self._original(element, obs, task) if element is not None and is_thumbnail(url, obs.page_url) else None
+        )
         failure: ImageSaveError | None = None
         for source in (original, url) if original else (url,):  # a site that refuses: Google's copy is still good
             try:
@@ -881,7 +883,7 @@ class Agent:
             task.pages.add(page_key(obs.page_url))
         task.scrolls = 0
         task.loading, task.loading_results = RESULTS_READS, False  # pressing the tile makes Chrome rebuild the page
-        small = " · Google's small copy" if is_thumbnail(source) else ""
+        small = " · Google's small copy" if is_thumbnail(source, obs.page_url) else ""
         return True, f"saved {path.name}{small} ({task.progress()})"
 
     def _original(self, thumbnail: UIElement, obs: Observation, task: ImageTask) -> str | None:

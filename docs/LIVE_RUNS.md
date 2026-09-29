@@ -57,7 +57,7 @@ From the 17:23–17:30 collection runs. Counted only listings that are the tool 
 | Mitre saw | 10 | 0 | 10 | 130 | 205 | 275 | 418 | 795 | 0 |
 | Socket set | 29 | 16 | 13 | 5 | 25 | 43 | 60 | 100 | 2 |
 
-Out of 317: 159 were off-topic or accessories. Socket sets are mostly €1 asks, most of them from one seller. Only 10 of 45 "mitre saw" results were mitre saws.
+Out of 317: 176 were off-topic, accessories or duplicates. Socket sets are mostly €1 asks, most of them from one seller. Only 10 of 45 "mitre saw" results were mitre saws.
 
 Best value (well below the median for a complete, branded or new item):
 
@@ -65,4 +65,4 @@ Best value (well below the median for a complete, branded or new item):
 - Angle grinder: Einhell 750W 115 mm — €40, Gzira; Efftool AG700 115 mm — €40, Żebbuġ; cordless mini grinder, 2 batteries and discs — €40, Qormi.
 - Welding machine: 300 A MMA inverter, new and boxed — €115, Rabat; 300 MMA inverter, new — €115, Santa Luċija; welding set, like new — €80, Sliema.
 - Mitre saw: sliding compound mitre saw — €150, Żebbuġ; Efftool mitre saw — €200, Żebbuġ; Makita LS1011 10" slide compound — €250, Għargħur.
-- Socket set: socket set, new and boxed (was €125) — €25, Rabat; 19-piece bit socket set — €25, Żabbar; 108-piece professional socket set, new — €55, Santa Luċija (just over the median, but the most complete).
+- Socket set: socket set, new and boxed (was €125) — €25, Rabat; 19-piece bit socket set — €25, Zabbar; 108-piece professional socket set, new — €55, Santa Luċija (just over the median, but the most complete).

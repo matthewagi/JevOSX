@@ -626,6 +626,12 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     print(f"  {mark} writer for free-form text: {status.describe()}")
     if status.hint and not status.available:
         print(f"      → optional: {status.hint}")
+    # Optional: Claude in the console (the "Claude" switch in jevosx ui).
+    has_key = bool(settings.pilot.api_key())
+    pilot_state = "off" if not settings.pilot.enabled else settings.pilot.model if has_key else "no ANTHROPIC_API_KEY"
+    print(f"  {'✓' if settings.pilot.enabled and has_key else '–'} Claude in the console: {pilot_state}")
+    if settings.pilot.enabled and not has_key:
+        print("      → optional: add ANTHROPIC_API_KEY=... to ~/JevOSX/.env to talk to Claude in jevosx ui")
     if settings.observer.vision != "off" and sys.platform == "darwin":
         from .observer.vision import screen_recording_allowed
 

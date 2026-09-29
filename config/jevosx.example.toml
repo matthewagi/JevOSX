@@ -112,6 +112,16 @@ base_url = "https://openrouter.ai/api/v1"
 model = ""
 timeout_s = 15.0
 
+[pilot]
+# Claude in the console: switch the composer to "Claude" and talk or type. Claude plans, asks what is missing,
+# hands concrete steps to Jev and checks the screen. Needs ANTHROPIC_API_KEY (for example in ~/JevOSX/.env).
+enabled = true
+model = "claude-opus-5-5"
+effort = "medium"                  # low | medium | high | xhigh | max
+web_search = true                  # may look up what a site or task needs (billed per search)
+max_tool_calls = 20                # per message you send
+max_tokens = 16000
+
 [keys]
 disabled = []                      # e.g. ["CMD_Q", "CMD_W"]
 

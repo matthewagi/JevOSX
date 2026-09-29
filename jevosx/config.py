@@ -202,6 +202,23 @@ class WriterSettings:
 
 
 @dataclass
+class PilotSettings:
+    """Claude in the console (`jevosx ui`): talk or type to Claude, which plans, asks what is missing, hands concrete
+    steps to Jev and checks the screen afterwards. Needs an Anthropic API key (ANTHROPIC_API_KEY, e.g. in .env)."""
+
+    enabled: bool = True
+    model: str = "claude-opus-5-5"
+    effort: str = "medium"  # low | medium | high | xhigh | max: how hard Claude thinks per reply
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    web_search: bool = True  # Claude may look up what a site or task needs (billed per search)
+    max_tool_calls: int = 20  # per message you send: a runaway loop stops here
+    max_tokens: int = 16000
+
+    def api_key(self, env: Mapping[str, str] | None = None) -> str | None:
+        return (env if env is not None else os.environ).get(self.api_key_env) or None
+
+
+@dataclass
 class LoginSettings:
     """Saved website logins (`jevosx login add github.com`): passwords in the macOS Keychain, never in files."""
 
@@ -227,6 +244,7 @@ class Settings:
     writer: WriterSettings = field(default_factory=WriterSettings)
     logins: LoginSettings = field(default_factory=LoginSettings)
     keys: KeySettings = field(default_factory=KeySettings)
+    pilot: PilotSettings = field(default_factory=PilotSettings)
 
     @classmethod
     def load(
@@ -286,6 +304,7 @@ class Settings:
             "writer.offer": (self.writer.offer, ("auto", "always")),
             "observer.vision": (self.observer.vision, ("auto", "always", "off")),
             "agent.plan": (self.agent.plan, ("auto", "off")),
+            "pilot.effort": (self.pilot.effort, ("low", "medium", "high", "xhigh", "max")),
         }
         for name, (value, allowed) in choices.items():
             if value not in allowed:

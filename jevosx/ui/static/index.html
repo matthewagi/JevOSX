@@ -84,6 +84,20 @@ button { cursor: pointer; }
 .pipeline span { padding: 4px 10px; border: 1px dashed var(--border-2); border-radius: 999px; }
 
 /* ---------- conversation ---------- */
+.claude { display: flex; margin: 12px 0 10px; gap: 10px; align-items: flex-start; }
+.claude .avatar { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 700;
+                  font-size: 13px; color: #fff; background: #d97757; }
+.claude .body { max-width: 82%; display: grid; gap: 6px; }
+.claude .bubble { background: var(--panel); border: 1px solid var(--border); padding: 10px 14px; border-radius: 4px 16px 16px 16px;
+                  white-space: pre-wrap; line-height: 1.5; box-shadow: var(--shadow); }
+.claude .bubble:empty::after { content: "…"; color: var(--muted); }
+.claude.error .bubble { border-color: var(--bad, #e5484d); color: var(--bad, #e5484d); }
+.tool-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 3px 10px;
+             border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); width: fit-content; }
+.tool-chip.done { color: var(--text); } .tool-chip.failed { color: var(--bad, #e5484d); }
+.handoff-line { margin: 12px 0 6px 36px; font-size: 12.5px; color: var(--muted); }
+.handoff-line b { color: var(--text); font-weight: 600; }
+.seg.who { min-width: 116px; }
 .you { display: flex; justify-content: flex-end; margin: 18px 0 8px; }
 .you .bubble { max-width: 78%; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--accent-2)));
                color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: var(--shadow); }
@@ -284,6 +298,12 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
       <div class="inputrow">
         <textarea id="goal" rows="1" placeholder='Tell your Mac what to do… e.g. In Safari, search for "accessibility API"'></textarea>
         <div class="actions">
+          <div class="seg who" id="who" title="Jev: run a command directly. Claude: talk it through; Claude hands the steps to JevOSX.">
+            <button type="button" data-v="jev">Jev</button><button type="button" data-v="claude">Claude</button>
+          </div>
+          <button type="button" id="new-chat" class="iconbtn hidden" title="New conversation with Claude" aria-label="New conversation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/></svg>
+          </button>
           <button type="button" id="mic" class="iconbtn" title="Speak your command" aria-label="Speak your command">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
@@ -345,7 +365,8 @@ const EXAMPLES = [
   ["Sell on Marketplace", "go to facebook and prepare a product to sell on marketplace a plastic welding gun for 40 euros generic text"],
   ["Confidence gate", "Do something interesting"],
 ];
-const state = { runs: new Map(), status: null, floor: 0.65, policy: "retry", running: false, tab: "screen", screenTimer: 0 };
+const state = { runs: new Map(), status: null, floor: 0.65, policy: "retry", running: false, tab: "screen", screenTimer: 0,
+  who: "jev", pilotBusy: false };
 
 /* ---------- helpers ---------- */
 function h(tag, attrs = {}, ...kids) {
@@ -403,6 +424,8 @@ async function refreshStatus() {
     const checks = $("#checks"); checks.replaceChildren();
     for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok === true ? "ok" : c.ok === false ? "bad" : ""), title: c.detail }, h("span", { class: "dot" }), c.name));
     checks.append(h("span", { class: "pill", title: "decision model" }, h("span", { class: "dot" }), s.model));
+    if (s.pilot) checks.append(h("span", { class: "pill " + (s.pilot.available === true ? "ok" : s.pilot.available === false ? "bad" : ""),
+      title: `Claude: ${s.pilot.detail}` }, h("span", { class: "dot" }), "Claude"));
     if (s.memory.enabled) checks.append(h("span", { class: "pill ok", title: "local trajectory memory" }, h("span", { class: "dot" }),
       `memory · ${s.memory.episodes ?? 0} runs`));
     if (s.stale && !state.staleShown) {
@@ -429,8 +452,10 @@ function runCard(run) {
   if (o.app) tags.push(`app: ${o.app}`); if (o.dry_run) tags.push("dry run"); if (o.expect_text) tags.push(`expect: ${o.expect_text}`);
   if (o.min_confidence !== null && o.min_confidence !== undefined) tags.push(`floor ${Number(o.min_confidence).toFixed(2)}`);
   if (o.low_confidence_policy) tags.push(`unsure → ${o.low_confidence_policy}`);
-  const you = h("div", { class: "you" }, h("div", {}, h("div", { class: "bubble" }, run.goal),
-    tags.length ? h("div", { class: "opts" }, tags.map((t) => h("span", { class: "tag" }, t))) : null));
+  const you = o.origin === "claude"
+    ? h("div", { class: "handoff-line" }, "Claude → JevOSX: ", h("b", {}, run.goal))
+    : h("div", { class: "you" }, h("div", {}, h("div", { class: "bubble" }, run.goal),
+      tags.length ? h("div", { class: "opts" }, tags.map((t) => h("span", { class: "tag" }, t))) : null));
   const status = h("span", { class: "status running" }, h("span", { class: "spinner" }), "Running");
   const steps = h("ol", { class: "steps" });
   const card = h("article", { class: "run" },
@@ -565,7 +590,9 @@ function renderRun(run) {
 function setRunning(on) {
   state.running = on;
   $("#send").classList.toggle("hidden", on); $("#stop").classList.toggle("hidden", !on);
-  $("#goal").placeholder = on ? "Running… press Stop (or ⌘.) to interrupt" : 'Tell your Mac what to do… e.g. In Safari, search for "accessibility API"';
+  $("#goal").placeholder = on ? "Working… press Stop (or ⌘.) to interrupt"
+    : state.who === "claude" ? "Talk to Claude: what should we get done?"
+    : 'Tell your Mac what to do… e.g. In Safari, search for "accessibility API"';
 }
 async function resync() {
   try {
@@ -597,12 +624,16 @@ function connect() {
   es.addEventListener("approval_resolved", (m) => { const a = JSON.parse(m.data); resolveApproval(a.request_id, a.allowed); });
   es.addEventListener("run_finished", (m) => {
     const { run_id, result } = JSON.parse(m.data); const entry = state.runs.get(run_id);
-    if (entry) finishRun(entry, result); setRunning(false); refreshStatus(); scheduleScreen();
-    if (voice.on) voice.say(`${RUN_TEXT[result.status] || result.status}. ${result.message || ""}`);
+    if (entry) finishRun(entry, result); setRunning(state.pilotBusy); refreshStatus(); scheduleScreen();
+    if (voice.on && !state.pilotBusy) voice.say(`${RUN_TEXT[result.status] || result.status}. ${result.message || ""}`);
     logLine("finished", `${result.status} after ${result.steps} step(s) ${result.message ? "— " + result.message : ""}`, result.ok ? "k" : "w");
   });
   es.addEventListener("run_error", (m) => { const e = JSON.parse(m.data); const entry = state.runs.get(e.run_id);
     if (entry) entry.card.append(h("div", { class: "note" }, e.message)); logLine("error", e.message, "e"); });
+  es.addEventListener("pilot_text", (m) => { const { delta } = JSON.parse(m.data); claude.text(delta); });
+  es.addEventListener("pilot_tool", (m) => claude.tool(JSON.parse(m.data)));
+  es.addEventListener("pilot_reply", (m) => claude.reply(JSON.parse(m.data).text || ""));
+  es.addEventListener("pilot_error", (m) => claude.error(JSON.parse(m.data).message || "something went wrong"));
   es.addEventListener("memory_changed", () => { if (state.tab === "memory") refreshMemory(); refreshStatus(); });
 }
 
@@ -675,6 +706,7 @@ function parseSlots(text) {
 async function submit(goalText) {
   const goal = (goalText ?? $("#goal").value).trim();
   if (!goal || state.running) return;
+  if (state.who === "claude") return claude.send(goal);
   const body = {
     goal, app: $("#opt-app").value, expect_text: $("#opt-expect").value, dry_run: $("#opt-dry").checked,
     use_memory: $("#opt-memory").checked, min_confidence: Number($("#opt-floor").value), low_confidence_policy: state.policy,
@@ -685,6 +717,73 @@ async function submit(goalText) {
   catch (e) { toast(e.message); logLine("run", e.message, "e"); }
 }
 function autosize() { const g = $("#goal"); g.style.height = "auto"; g.style.height = Math.min(180, g.scrollHeight) + "px"; }
+
+/* ---------- Claude ---------- */
+// The conversation with Claude: your messages, Claude's streamed replies, and chips for what it asked JevOSX to do.
+const TOOL_TEXT = { look_at_screen: "Looking at the screen", recent_runs: "Checking recent runs" };
+const claude = {
+  body: null, bubble: null, chips: new Map(),
+  setWho(who) {
+    state.who = who; try { localStorage.setItem("jevosx-who", who); } catch (_) {}
+    for (const b of $$("#who button")) b.classList.toggle("on", b.dataset.v === who);
+    $("#new-chat").classList.toggle("hidden", who !== "claude");
+    $("#send").textContent = who === "claude" ? "Send" : "Run";
+    setRunning(state.running);
+  },
+  async send(text) {
+    hideWelcome();
+    $("#feed").append(h("div", { class: "you" }, h("div", {}, h("div", { class: "bubble" }, text))));
+    this.body = this.bubble = null; state.pilotBusy = true; setRunning(true); scrollFeed();
+    try { await api("/api/pilot", { text }); $("#goal").value = ""; autosize(); }
+    catch (e) { state.pilotBusy = false; setRunning(false); this.error(e.message); }
+  },
+  row() {  // Claude's current turn in the feed: its words, then chips for what it asked for
+    if (this.body) return this.body;
+    this.body = h("div", { class: "body" }); this.bubble = null;
+    $("#feed").append(h("div", { class: "claude" }, h("span", { class: "avatar", "aria-hidden": "true" }, "C"), this.body));
+    return this.body;
+  },
+  text(delta) {
+    if (!this.bubble) { const row = this.row(); this.bubble = h("div", { class: "bubble" }); row.append(this.bubble); }
+    this.bubble.append(delta); scrollFeed();
+  },
+  tool(t) {
+    if (t.phase === "start") {
+      const label = t.name === "run_task" ? `Asking JevOSX: ${t.input.goal}` : TOOL_TEXT[t.name] || t.name;
+      const chip = h("span", { class: "tool-chip" }, h("span", { class: "spinner" }), label);
+      this.row().append(chip); this.chips.set(t.id, chip); this.bubble = null;
+      if (t.name === "run_task") this.body = null;  // the run card comes next; Claude's next words go below it
+    } else {
+      const chip = this.chips.get(t.id); if (!chip) return;
+      chip.classList.add(t.phase === "done" ? "done" : "failed");
+      chip.querySelector(".spinner")?.remove();
+      chip.prepend(t.phase === "done" ? "✓ " : "✗ ");
+      if (t.summary) chip.append(` · ${t.summary}`);
+    }
+    scrollFeed();
+  },
+  async reply(text) {
+    if (text && !this.bubble && !(this.body && this.body.querySelector(".bubble"))) this.text(text);  // nothing streamed
+    this.body = this.bubble = null; state.pilotBusy = false; setRunning(false);
+    refreshStatus();
+    if (!voice.on || !text) return;
+    await voice.say(text);
+    if (/\?\s*$/.test(text) && Recognition) {  // Claude asked something: listen for the answer
+      const heard = await voice.listen();
+      if (heard) this.send(heard);
+    }
+  },
+  error(message) {
+    this.body = this.bubble = null; state.pilotBusy = false; setRunning(false);
+    $("#feed").append(h("div", { class: "claude error" }, h("span", { class: "avatar", "aria-hidden": "true" }, "C"),
+      h("div", { class: "body" }, h("div", { class: "bubble" }, message))));
+    scrollFeed();
+    if (voice.on) voice.say(message);
+  },
+  async reset() {
+    try { await api("/api/pilot/reset", {}); toast("New conversation with Claude"); this.body = this.bubble = null; } catch (e) { toast(e.message); }
+  },
+};
 
 /* ---------- voice ---------- */
 // Speaking: the Mac's own voice through the console (`say`, the system voice: can be a Siri voice), or the browser's.
@@ -746,7 +845,7 @@ const voice = {
     const heard = await this.listen(); this.onInterim = null;
     if (!heard) return;
     goal.value = heard; autosize();
-    if (this.on) { this.say("On it."); submit(heard); }
+    if (this.on) { if (state.who !== "claude") this.say("On it."); submit(heard); }
   },
   async announce(a, box, answer, fields, typed) {  // talk an approval, question or hand-off through
     if (!this.on) return;
@@ -801,6 +900,10 @@ function init() {
   document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "." && state.running) $("#stop").click(); });
   $("#toggle-options").onclick = () => $("#options").classList.toggle("hidden");
   voice.init();
+  for (const b of $$("#who button")) b.onclick = () => claude.setWho(b.dataset.v);
+  $("#new-chat").onclick = () => claude.reset();
+  let who = "jev"; try { who = localStorage.getItem("jevosx-who") || "jev"; } catch (_) {}
+  claude.setWho(who === "claude" ? "claude" : "jev");
   $("#opt-floor").addEventListener("input", (e) => { $("#opt-floor-v").textContent = Number(e.target.value).toFixed(2); state.floor = Number(e.target.value); });
   for (const b of $$("#opt-policy button")) b.onclick = () => setPolicy(b.dataset.v);
   for (const b of $$(".tabs button")) b.onclick = () => showTab(b.dataset.tab);

@@ -176,6 +176,23 @@ the agent should find out what it is missing before it starts and ask only for t
 - Next: decide between "look first" and "ask first" per task (open the form, read which fields are required, then
   ask), with a web search when the model does not know what a site needs.
 
+## Phase 8: Claude in the console (done)
+
+Asked for: talk to Claude, which goes in, tries things and sees how JevOSX reacts.
+
+- **Claude as the head, Jev as the hands.** `jevosx/pilot.py` runs a conversation with Claude (Anthropic API,
+  `claude-opus-5-5`, streamed, adaptive thinking, prompt caching, server-side refusal fallback). Its tools:
+  `run_task` (one JevOSX run, waited for, summarized with the screen afterwards), `look_at_screen`, `recent_runs`,
+  and web search. Claude never clicks: every action is still a Jev choice behind the gate and the safety policy.
+- **One feed.** Claude's replies stream into chat bubbles; each task it hands over appears as a normal run card
+  ("Claude → JevOSX: …") with its approvals and questions in place.
+- **Voice.** Claude's replies are spoken; a question from Claude opens the microphone for the answer.
+- **Guardrails.** Tool inputs are validated before anything runs, a cut-off or declined reply never runs its tools,
+  a cap stops runaway loops (`pilot.max_tool_calls`), and Stop ends both the run and Claude's turn.
+- **Exact text.** Claude passes the text for each field with the task (`texts`, e.g. title and price); it becomes
+  the run's text slots, so JevOSX never has to cut the words to type out of a sentence. Passwords are refused.
+- Next: a screenshot of the work window for Claude, for pages the accessibility tree describes poorly.
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

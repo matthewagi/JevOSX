@@ -407,6 +407,25 @@ Without a model, simple patterns take over: sites named without ".com" ("go to f
 quoted text, URLs and the phrase after "search for". Passwords are never read from a request; they come only from
 the Keychain.
 
+### Claude in the console
+
+Switch the composer from **Jev** to **Claude** and talk (or type) to Claude instead of giving JevOSX commands. Claude
+works out what you want, asks for what only you know, and hands JevOSX one concrete task at a time ("open
+facebook.com/marketplace/create/item in Chrome", "type the price 40 into the Price field"). Each task appears as a
+normal run card, with its approvals and questions for you. Afterwards Claude reads how the run ended, looks at the
+screen when it needs to, and tries a different route when a run did not get there. With voice on, Claude's replies
+are spoken, and when it asks you something it listens for your answer.
+
+- Claude's tools are `run_task` (one JevOSX run, waited for, with the exact text for each field it should type),
+  `look_at_screen` (the element table and text of the window JevOSX works in) and `recent_runs`, plus web search to
+  look up what a site or task needs.
+- Jev still makes every click and keystroke, behind the confidence gate and the safety policy: Claude cannot click
+  anything itself, and consequential steps still ask you.
+- Setup: add `ANTHROPIC_API_KEY=...` to `~/JevOSX/.env` and restart `jevosx ui` (`jevosx doctor` shows whether it is
+  set). The `[pilot]` section picks the model (`claude-opus-5-5`), effort, web search and a cap on tool calls per
+  message. Requests use the server-side refusal fallback (a declined request is retried on a fallback model).
+- The demo console (`jevosx ui --demo`) has a simulated Claude that hands your message to JevOSX as one task.
+
 ### Talking it through (questions and voice)
 
 **It asks what only you know, before it starts.** When the on-device model reads your request it also lists what the

@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from .. import __version__
@@ -40,6 +40,8 @@ from ..errors import JevOSXError
 from ..executor.base import DryRunExecutor, Executor
 from ..logins import LoginStore
 from ..memory.store import MemoryStore
+from ..observer.base import BackgroundObserver
+from ..pilot import DemoModel, Pilot, PilotUnavailable, summarize_run
 from ..planner import Planner
 from ..router.policy import JevRouter, element_state
 from ..types import Action, Observation
@@ -95,6 +97,7 @@ class RunOptions:
     low_confidence_policy: str | None = None
     slots: dict[str, str] = field(default_factory=dict)
     use_memory: bool = True
+    origin: str = "person"  # person | claude (a task Claude handed to JevOSX in the conversation)
 
     @classmethod
     def from_json(cls, data: Any) -> RunOptions:
@@ -243,6 +246,14 @@ class RunManager:
         self.current: dict[str, Any] | None = None
         self.history: deque[dict[str, Any]] = deque(maxlen=20)
         self._started_code = code_version()
+        # Claude in the console: talks with the person and hands tasks to JevOSX through this manager.
+        self.pilot = Pilot(
+            settings.pilot,
+            self,
+            bus.publish,
+            model=DemoModel() if demo else None,
+            api_key=settings.pilot.api_key(),
+        )
 
     # ---- lifecycle ----------------------------------------------------------------------------------------------
     def components(self) -> Components:
@@ -308,7 +319,49 @@ class RunManager:
             self._thread.start()
             return run_id
 
+    # ---- what Claude uses (jevosx.pilot.PilotHost) ----------------------------------------------------------------
+    def look(self) -> dict[str, Any]:
+        """The agent's own work window when it has one (not the console in front), else the front window."""
+        agent = self._agent
+        observer = self.components().observer
+        if not self.running and agent is not None and agent.work is not None and agent.works_behind:
+            with contextlib.suppress(JevOSXError):
+                return observation_json(cast(BackgroundObserver, observer).observe_window(agent.work))
+        return self.observe()
+
+    def run_task(self, goal: str, max_steps: int, texts: dict[str, str] | None = None) -> dict[str, Any]:
+        """Start a JevOSX run for Claude and wait for it; the person sees it and answers its questions as usual."""
+        deadline = time.monotonic() + 30
+        while self.running and time.monotonic() < deadline:
+            time.sleep(0.2)  # the person's own run is finishing
+        policy = self.settings.agent.console_low_confidence_policy  # the person is watching, as for their own runs
+        options = RunOptions(
+            goal=goal, max_steps=max_steps, low_confidence_policy=policy, slots=dict(texts or {}), origin="claude"
+        )
+        run_id = self.start(options)
+        while self.running and not self.pilot_stopped():
+            time.sleep(0.2)
+        while self.running:  # Stop was pressed: the run ends after its current step
+            time.sleep(0.2)
+        run = next((r for r in self.history if r["id"] == run_id), self.current or {"id": run_id})
+        screen = self.look()
+        compact = {k: screen.get(k) for k in ("app", "window", "url") if screen.get(k)}
+        compact["elements"] = [
+            f"[{e['index']}] {e['role']} {e['label']}" + (f" = {e['value']}" if e.get("value") else "")
+            for e in screen.get("elements", [])[:40]
+        ]
+        compact["text"] = str(screen.get("text", ""))[:1200]
+        return summarize_run(run, compact)
+
+    def recent_runs(self, count: int) -> list[dict[str, Any]]:
+        episodes = self.memory(count).get("episodes", [])
+        return [{k: e.get(k) for k in ("goal", "status", "steps")} for e in episodes[:count]]
+
+    def pilot_stopped(self) -> bool:
+        return self.pilot.stopping
+
     def stop(self) -> None:
+        self.pilot.stop()
         self._stop.set()
         for approval in list(self._approvals.values()):
             approval.allowed = False
@@ -504,6 +557,7 @@ def observation_json(obs: Observation) -> dict[str, Any]:
         "available": True,
         "app": {"name": obs.app.name, "bundle_id": obs.app.bundle_id, "pid": obs.app.pid},
         "window": obs.window.title if obs.window else None,
+        "url": obs.page_url,
         "windows": [w.title for w in obs.windows],
         "elements": [element_state(e) for e in obs.elements],
         "menu_items": [{"id": f"m{m.index}", "label": m.label, "shortcut": m.shortcut} for m in obs.menu_items],
@@ -662,7 +716,8 @@ class _Handler(BaseHTTPRequestHandler):
             if url.path == "/api/events":
                 return self._events()
             if url.path == "/api/status":
-                return self._send_json({**manager.status(), "speech": self.ui.speaker.available})
+                status = {**manager.status(), "speech": self.ui.speaker.available, "pilot": manager.pilot.status()}
+                return self._send_json(status)
             if url.path == "/api/state":
                 return self._send_json(manager.state())
             if url.path == "/api/observe":
@@ -688,6 +743,18 @@ class _Handler(BaseHTTPRequestHandler):
             if url.path == "/api/stop":
                 manager.stop()
                 return self._send_json({"stopping": manager.running})
+            if url.path == "/api/pilot":
+                text = data.get("text")
+                if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+                    raise ValueError("text is required (max 4000 characters)")
+                try:
+                    manager.pilot.send(text)
+                except PilotUnavailable as exc:
+                    return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+                return self._send_json({"ok": True}, HTTPStatus.ACCEPTED)
+            if url.path == "/api/pilot/reset":
+                manager.pilot.reset()
+                return self._send_json({"ok": True})
             if url.path == "/api/say":
                 text = data.get("text")
                 if not isinstance(text, str):

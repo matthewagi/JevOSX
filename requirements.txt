@@ -13,3 +13,6 @@ pyobjc-framework-Vision>=10.3; sys_platform == "darwin"
 
 # Saved website logins live in the macOS Keychain (`jevosx login add github.com`)
 keyring>=25; sys_platform == "darwin"
+
+# Claude in the console (`jevosx ui`, Claude mode): talks it through with you and hands steps to Jev
+anthropic>=1.9,<2

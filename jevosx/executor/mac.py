@@ -21,7 +21,7 @@ from ..config import ExecutorSettings
 from ..errors import AXError, StaleElementError
 from ..observer.ax import AX_ATTRIBUTE_UNSUPPORTED
 from ..observer.base import WindowRef
-from ..observer.walker import url_text
+from ..observer.walker import own_label, url_text
 from ..sites import host_matches, page_host
 from ..types import (
     BROWSER_BUNDLES,
@@ -249,21 +249,37 @@ class MacExecutor:
         keyboard.type_text(text, delay_s=self.settings.key_delay_s)
         if secret or element.secure:
             return ActionResult(True, "keystrokes", "secure field: value not read back")
-        if text.strip() and not self._text_appears(node, text.strip()):
+        if text.strip() and not self._text_appears(node, text.strip(), element, obs.app.pid):
             return ActionResult(False, "keystrokes", "typed text did not appear in the field")
         return ActionResult(True, "keystrokes")
 
-    def _text_appears(self, node: Any, text: str) -> bool:
+    def _text_appears(self, node: Any, text: str, element: UIElement, pid: int | None) -> bool:
         """Wait for posted keystrokes to show up in the field's AXValue. Key events are delivered asynchronously: seen
         live, a fresh Chrome window's address bar still read "" just after the last key and held the text ~30 ms later,
         so a single early read-back reported a failure and the agent lost a step typing it again."""
         started = time.monotonic()
         while True:
             time.sleep(self.settings.settle_poll_s)
-            if text in str(node.get("AXValue") or ""):
+            if text in str(node.get("AXValue") or "") or self._replacement_holds(element, pid, text):
                 return True
             if time.monotonic() - started >= self.settings.settle_timeout_s:
                 return False
+
+    def _replacement_holds(self, element: UIElement, pid: int | None, text: str) -> bool:
+        """The keys went to a field that took the observed one's place: the focused element, with the same role and
+        label, holds the text. Seen live: Facebook re-rendered "Search Marketplace" while its page was still loading,
+        the keys landed in the new combobox, the observed node kept reading "", and the agent typed the search again."""
+        if pid is None:
+            return False
+        try:
+            focused = self._AXNode.application(pid).get("AXFocusedUIElement")
+            if focused is None:
+                return False
+            attrs = focused.get_many(("AXRole", "AXTitle", "AXDescription", "AXPlaceholderValue", "AXValue"))
+        except (AXError, StaleElementError):
+            return False
+        same_field = attrs.get("AXRole") == element.role and own_label(attrs, text_input=True) == element.label
+        return same_field and text in str(attrs.get("AXValue") or "")
 
     def _scroll(self, element: UIElement, obs: Observation, *, down: bool) -> ActionResult:
         node = element.node

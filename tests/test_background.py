@@ -14,7 +14,7 @@ from jevosx.executor.keys import key_vocabulary
 from jevosx.observer.base import BackgroundObserver, WindowRef
 from jevosx.router.policy import JevRouter
 from jevosx.types import CLICK, PRESS_KEY, TYPE_TEXT, Action, ActionResult, AppInfo, Observation, WindowInfo
-from tests.fakes import element, observation, scripted_client
+from tests.fakes import NoFocusAX, element, observation, scripted_client
 
 CONSOLE = "JevOSX Console - Google Chrome"
 NEW_TAB = "New Tab - Google Chrome"
@@ -232,6 +232,7 @@ def mac_executor(monkeypatch: pytest.MonkeyPatch, front: list[int]):
     monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: sent.append(text))
     executor = object.__new__(MacExecutor)
     executor.settings = ExecutorSettings(focus_timeout_s=0.05)
+    executor._AXNode = NoFocusAX
     executor._frontmost_pid = lambda: front[0]
     executor._activate = lambda pid: front.__setitem__(0, pid) if front[1:] == ["obeys"] else None
     return executor, sent

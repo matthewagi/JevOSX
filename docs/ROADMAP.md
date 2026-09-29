@@ -333,6 +333,12 @@ to save and how many before starting.
   while the page itself had nothing readable yet (30 elements, all Chrome's own), so the page counted as arrived,
   and Jev, seeing an empty page, typed facebook.com twice more. A page now counts as arrived only once something in
   its web area can be read.
+- Seen live (17:25, welding machine again): the first TYPE_TEXT into "Search Marketplace" reported "typed text did
+  not appear" after the full 0.8 s wait, and the next step found "welding machine" already in a combobox of the same
+  name (as at 16:07 with "cordless drill"). That step's observe took 3.2 s against 0.4 s on the angle grinder run
+  that worked: Facebook was still rendering and replaced the combobox, so the keys went to the new one while the
+  observed node kept reading "". The read-back now also accepts the focused field when it has the same role and
+  label and holds the text; a differently named field (such as "Search Facebook") still counts as a failure.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

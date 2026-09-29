@@ -81,6 +81,14 @@ def element(index: int, role: str, label: str, *, ops: tuple[str, ...] = ("CLICK
     return UIElement(index=index, role=role, subrole=kwargs.pop("subrole", None), label=label, ops=ops, **kwargs)
 
 
+class NoFocusAX:
+    """Stands in for AXNode's application lookup in an executor built without __init__: no field has the focus."""
+
+    @staticmethod
+    def application(pid: int) -> FakeNode:
+        return FakeNode("AXApplication")
+
+
 def observation(
     elements: list[UIElement],
     *,

@@ -193,6 +193,43 @@ def test_an_address_is_opened_without_chrome_s_inline_completion(monkeypatch):
     assert opened == ["facebook.com"]
 
 
+@pytest.mark.parametrize(("focused_label", "ok"), [("Search Marketplace", True), ("Search Facebook", False)])
+def test_typed_text_is_found_in_the_field_that_replaced_the_observed_one(monkeypatch, focused_label, ok):
+    """Seen live: Facebook re-rendered "Search Marketplace" while its page loaded. The keys went to the new combobox,
+    the observed node kept reading "", and the agent typed the search a second time. A focused field with the same
+    role and label counts; any other field does not."""
+    from jevosx.config import ExecutorSettings
+    from jevosx.executor import input as keyboard
+    from jevosx.executor.mac import MacExecutor
+
+    class Node:
+        def __init__(self, **values: Any) -> None:
+            self.values = values
+
+        def set(self, attribute: str, value: Any) -> None:
+            pass
+
+        def get(self, attribute: str, default: Any = None) -> Any:
+            return self.values.get(attribute, default)
+
+        def get_many(self, attributes: tuple[str, ...]) -> dict[str, Any]:
+            return {a: self.values[a] for a in attributes if a in self.values}
+
+    replacement = Node(AXRole="AXComboBox", AXDescription=focused_label)
+    app = Node(AXFocusedUIElement=replacement)
+    monkeypatch.setattr(keyboard, "post_chord", lambda chord, delay_s=0: None)
+    monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: replacement.values.update(AXValue=text))
+    executor = object.__new__(MacExecutor)
+    executor.settings = ExecutorSettings(settle_timeout_s=0.1, settle_poll_s=0.01)
+    executor._frontmost_pid = lambda: 300
+    executor._AXNode = type("AX", (), {"application": staticmethod(lambda pid: app)})
+    combobox = element(
+        40, "AXComboBox", "Search Marketplace", kind="text_input", ops=("TYPE_TEXT",), in_web_area=True, node=Node()
+    )
+    result = executor.execute(Action(TYPE_TEXT, element=combobox, text="welding machine"), observation([], app=CHROME))
+    assert result.ok is ok
+
+
 def test_a_browser_window_offers_one_address_bar():
     shown = address_bar(value="google.com/search?q=plastic+welding+gun")
     edited = address_bar(value="plastic welding gun", focused=True)

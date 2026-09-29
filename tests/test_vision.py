@@ -17,7 +17,7 @@ from jevosx.observer.vision import (
 )
 from jevosx.router.policy import build_state
 from jevosx.types import CLICK, TYPE_TEXT, Action, Rect
-from tests.fakes import FakeNode, element, observation
+from tests.fakes import FakeNode, NoFocusAX, element, observation
 
 WINDOW = Rect(100, 50, 800, 600)
 
@@ -164,6 +164,7 @@ def test_typed_text_that_shows_up_late_in_the_field_counts_as_typed(monkeypatch)
     monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: None)
     executor = object.__new__(MacExecutor)
     executor.settings = ExecutorSettings(settle_poll_s=0.001, settle_timeout_s=0.5)
+    executor._AXNode = NoFocusAX
     field = element(1, "AXTextField", "Address and search bar", ops=("TYPE_TEXT",), in_web_area=False,
                     node=LateField("AXTextField"))  # fmt: skip
     obs = observation([field])

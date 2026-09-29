@@ -100,10 +100,16 @@ model output coordinates, commands or passwords.
 
 ## Phase 4: planning and handoff (done)
 
-- **On-device plan.** For multi-part goals ("write a poem, save it as poem.rtf, then open it in Pages") the local
-  model splits the goal into ordered steps once per run. The plan is sent to Jev as context: a suggested outline
-  from a small model, never a command. Every action is still a Jev choice among observed ids. It is shown in the
-  CLI and console, and `agent.plan = auto | off` controls it.
+- **Reading the request with the on-device model.** Once per run the local model reads the request and returns
+  its steps and the exact values to type: website, title, price, search words, and a written description when
+  asked. The values become text slots and the steps a plan, both hints for Jev, never actions.
+  - Patterns cover the case without a model: "go to facebook", "<item> for 40 euros", quotes, URLs.
+  - Requests are messy ("prepare a product to sell on marketplace a plastic welding gun for 40 euros generic text"),
+    so regexes alone were not enough.
+  - `agent.plan = auto | off` controls it.
+- **Same-page links.** Search results link the same page several times, which split Jev's confidence below the
+  floor (seen live: "look up the population of Malta on Wikipedia"). Links now carry their destination, which Jev
+  sees as `to`. Probability spread over links to the chosen page counts as one choice.
 - **Handoff.** `ASK_USER` (see Phase 2) works for any app, not only logins.
 
 ## Next research (not built yet)

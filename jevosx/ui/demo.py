@@ -276,11 +276,15 @@ class Safari(DemoApp):
         self.username = ""
         self.password = ""
         self.error = ""
+        self.listing: dict[str, str] | None = None  # the simulated Marketplace "item for sale" form
+        self.published = False
 
     def title(self) -> str:
         return self.page
 
     def url(self) -> str | None:
+        if self.listing is not None:
+            return "https://www.facebook.com/marketplace/create/item"
         if self.login == "form":
             return "https://github.com/login"
         if self.login == "2fa":
@@ -314,11 +318,25 @@ class Safari(DemoApp):
             ]
         return [Spec("AXLink", name, container=page, web=True) for name in ("Repositories", "Pull requests", "Issues")]
 
+    def _listing_specs(self) -> list[Spec]:
+        page, form = f'web page "{self.page}"', self.listing or {}
+        return [
+            Spec("AXButton", "Add photos", container=page, web=True),
+            Spec("AXTextField", "Title", value=form.get("Title", ""), container=page, web=True),
+            Spec("AXTextField", "Price", value=form.get("Price", ""), container=page, web=True),
+            Spec("AXPopUpButton", "Condition", value="New", container=page, web=True),
+            Spec("AXTextArea", "Description", value=form.get("Description", ""), container=page, web=True),
+            Spec("AXButton", "Publish", container=page, web=True),
+        ]
+
     def specs(self) -> list[Spec]:
         links = self.results or [f"Favorites: {f}" for f in self.FAVORITES]
-        content = self._sign_in_specs() if self.login else [
+        if self.listing is not None:
+            content = self._listing_specs()
+        else:
+            content = self._sign_in_specs() if self.login else [
             Spec("AXLink", link, container=f'web page "{self.page}"', web=True) for link in links
-        ]  # fmt: skip
+            ]  # fmt: skip
         return [
             Spec("AXButton", "Back", container="toolbar", enabled=self.page != "Start Page"),
             Spec(
@@ -337,6 +355,9 @@ class Safari(DemoApp):
         return [("File › New Tab", "⌘T"), ("File › New Window", "⌘N"), ("History › Home", "⇧⌘H")]
 
     def text(self) -> str:
+        if self.listing is not None:
+            state = "Published" if self.published else "Draft, not published"
+            return f"Marketplace · Item for sale · {state} · Photos are required before publishing"
         if self.login == "form":
             return "Sign in to GitHub" + (f" · {self.error}" if self.error else "")
         if self.login == "2fa":
@@ -353,7 +374,9 @@ class Safari(DemoApp):
         query = self.address.strip()
         if not query:
             return "nothing to load"
-        if re.fullmatch(r"(?:https?://)?(?:www\.)?github\.com(?:/\S*)?", query):
+        if re.fullmatch(r"(?:https?://)?(?:www\.)?facebook\.com/marketplace(?:/\S*)?", query):
+            self.page, self.results, self.listing = "Marketplace – Item for sale | Facebook", [], {}
+        elif re.fullmatch(r"(?:https?://)?(?:www\.)?github\.com(?:/\S*)?", query):
             self.page, self.results, self.login, self.error = "Sign in to GitHub · GitHub", [], "form", ""
         elif re.fullmatch(r"[\w-]+(\.[\w-]+)+(/\S*)?", query):
             self.page, self.results = query, []
@@ -366,6 +389,9 @@ class Safari(DemoApp):
         if label == "Back":
             self.__init__()  # type: ignore[misc]
             return "back"
+        if label == "Publish" and self.listing is not None:
+            self.published = True
+            return "published the listing"
         if label == "Sign in" and self.login == "form":
             if (self.username, self.password) == self.DEMO_LOGIN:
                 self.login, self.page, self.error = "2fa", "Two-factor authentication · GitHub", ""
@@ -379,7 +405,9 @@ class Safari(DemoApp):
         return f"opened {name}"
 
     def type(self, label: str, text: str) -> str:
-        if label == "Username or email address":
+        if self.listing is not None and label in ("Title", "Price", "Description"):
+            self.listing[label] = text
+        elif label == "Username or email address":
             self.username = text
         elif label == "Password":
             self.password = text
@@ -699,6 +727,10 @@ def _find(question: dict[str, Any] | None, predicate: Callable[[str], bool]) -> 
     return next((cid for cid, crit in question["criteria"].items() if predicate(_label(crit).lower())), None)
 
 
+def _labelled(question: dict[str, Any] | None, label: str) -> str | None:
+    return _find(question, lambda text: text == label)
+
+
 def _words(text: str) -> set[str]:
     return {w for w in _WORD.findall(text.lower()) if w not in STOPWORDS and len(w) > 1}
 
@@ -711,7 +743,9 @@ def _infer_app(lowered: str, explicit: str | None) -> str | None:
     if re.search(r"\bnotes?\b", lowered):
         return "Notes"
     if re.search(
-        r"\b(search|website|browse|visit|look (?:for|up)|google|web|online|pictures?|images?)\b|\.com\b", lowered
+        r"\b(search|website|browse|visit|look (?:for|up)|google|web|online|pictures?|images?|facebook|marketplace)\b"
+        r"|\.com\b",
+        lowered,
     ):
         return "Safari"
     if re.search(r"\b(folder|downloads|documents|desktop|applications)\b", lowered):
@@ -789,6 +823,33 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
     ):
         app_id = _find(questions.get("app_target"), lambda label: label == wanted.lower())
         return answer(OPEN_APP, 0.95, **({"app_target": (app_id, 0.96)} if app_id else {}))
+
+    # 2a. A Marketplace listing: open the "item for sale" form, fill title, price and description. Never publish.
+    if "marketplace" in lowered and front == "Safari":
+        by_label = {e["label"].lower(): e for e in elements}
+        offered = questions.get("text_slot", {}).get("criteria", {})
+        fields = questions.get("type_text_target")
+        if "title" in by_label:
+            wanted_slots = {"title": ("title", "item_name"), "price": ("price",), "description": ("description",)}
+            for label, slot_names in wanted_slots.items():
+                if by_label[label].get("value") or TYPE_TEXT not in ops:
+                    continue
+                slot = next((n for n in slot_names if n in offered), GENERATE if GENERATE in offered else None)
+                field_id = _labelled(fields, label)
+                if slot and field_id:
+                    return answer(TYPE_TEXT, 0.9, type_text_target=(field_id, 0.92), text_slot=(slot, 0.93))
+            return answer("DONE", 0.9)  # filled in; publishing (and photos) stay with the person
+        address = by_label.get("search or enter website name", {})
+        site = next((n for n, crit in offered.items() if "marketplace" in _label(crit).lower()), None)
+        if site and "marketplace" not in str(address.get("value", "")) and TYPE_TEXT in ops:
+            address_id = _labelled(fields, "search or enter website name")  # None: it is the only field
+            address_heads: dict[str, Pick] = {"text_slot": (site, 0.93)}
+            if address_id:
+                address_heads["type_text_target"] = (address_id, 0.92)
+            return answer(TYPE_TEXT, 0.9, **address_heads)
+        if PRESS_KEY in ops:
+            key = _find(questions.get("key_target"), lambda text: text == "return")
+            return answer(PRESS_KEY, 0.9, **({"key_target": (key, 0.94)} if key else {}))
 
     # 2. Finished?
     finished = not pending and not compose and submitted and (not wants_save or saved) and (not wants_delete or deleted)

@@ -29,7 +29,7 @@ from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import Observer
-from .planner import Planner
+from .planner import GoalReading, Planner, merge_slots
 from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal
 from .types import (
@@ -255,8 +255,12 @@ class Agent:
             raise ValueError("goal must not be empty")
         cfg = self.settings.agent
         max_steps = max_steps or cfg.max_steps
+        # The writer's model reads the goal once (steps + exact values to type); patterns fill in when it cannot.
+        reading = self.planner.read(goal) if self.planner is not None else GoalReading()
+        plan = reading.steps
+        self.last_plan = plan
         text_source = TextSource(
-            {**slots_from_goal(goal), **(text_slots or {})},
+            {**merge_slots(reading.values, slots_from_goal(goal)), **(text_slots or {})},
             self.text_writer,
             generate=self.settings.writer.offer == "always" or wants_generation(goal),
         )
@@ -276,11 +280,8 @@ class Agent:
             return event
 
         try:
-            plan = self.planner.plan(goal) if self.planner is not None else []
-            self.last_plan = plan
-            if plan:
-                listing = " · ".join(f"{i}. {step}" for i, step in enumerate(plan, start=1))
-                yield emit(StepEvent(step=0, status="plan", action="PLAN", message=listing))
+            if reading.steps or reading.values:
+                yield emit(StepEvent(step=0, status="plan", action="PLAN", message=reading.summary()))
             if app:
                 result = self._open_requested_app(app)
                 history.append({"step": 0, "action": f"OPEN_APP {app} (requested)", "result": result.detail or "ok"})

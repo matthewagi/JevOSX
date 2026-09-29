@@ -59,7 +59,7 @@ store_typed_text = false
 keep_episodes = 5000
 
 [safety]
-confirm_patterns = ['\bdelete\b', '\bsend\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b']
+confirm_patterns = ['\bdelete\b', '\bsend\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b', '\bpublish\b', '\bpost\b', '\bsubmit\b']
 deny_apps = ["com.apple.keychainaccess", "com.apple.Passwords"]
 confirm_keys = ["CMD_Q"]
 deny_keys = []
@@ -78,7 +78,7 @@ stuck_after = 3                    # consecutive actions with no visible change 
 history_size = 8
 max_done_rejections = 2
 max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
-plan = "auto"                      # auto: the writer's model outlines multi-part goals for Jev (context only) | off
+plan = "auto"                      # auto: the writer's model reads the request once: steps + values to type | off
 
 [writer]
 # Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).

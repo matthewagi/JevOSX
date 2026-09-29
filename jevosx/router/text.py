@@ -40,6 +40,64 @@ _TRAILING_CLAUSE = re.compile(
 _URL = re.compile(r"\b(?:https?://)?(?:[a-z0-9-]+\.)+(?:com|org|net|io|ai|dev|app|co|edu|gov|uk|de|fr)(?:/[^\s\"]*)?",
                   re.IGNORECASE)  # fmt: skip
 
+# Well-known sites that people name without a domain ("go to facebook", "on youtube"): offered as addresses to type.
+KNOWN_SITES = {
+    "facebook": "facebook.com",
+    "marketplace": "facebook.com/marketplace",
+    "instagram": "instagram.com",
+    "youtube": "youtube.com",
+    "gmail": "mail.google.com",
+    "google": "google.com",
+    "wikipedia": "wikipedia.org",
+    "amazon": "amazon.com",
+    "ebay": "ebay.com",
+    "twitter": "x.com",
+    "linkedin": "linkedin.com",
+    "reddit": "reddit.com",
+    "netflix": "netflix.com",
+    "github": "github.com",
+    "whatsapp": "web.whatsapp.com",
+    "chatgpt": "chatgpt.com",
+    "outlook": "outlook.live.com",
+    "spotify": "open.spotify.com",
+    "tiktok": "tiktok.com",
+    "pinterest": "pinterest.com",
+    "airbnb": "airbnb.com",
+    "booking": "booking.com",
+    "etsy": "etsy.com",
+    "vinted": "vinted.com",
+    "craigslist": "craigslist.org",
+    "maltapark": "maltapark.com",
+}
+_SITE_NAMED = re.compile(
+    r"\b(?:go\s+to|goto|open|visit|browse|on|at|to|in|into|log\s*in\s+to|sign\s*in\s+to)\s+(?:the\s+)?(?P<site>[a-z][\w-]*)",
+    re.IGNORECASE,
+)
+_SELLING = re.compile(r"\b(?:sell|selling|listing|list\s+(?:a|an|my|the)|post\s+(?:a|an)|advert)\b", re.IGNORECASE)
+MARKETPLACE_NEW_ITEM = "facebook.com/marketplace/create/item"
+
+# "a plastic welding gun for 40 euros" → item "plastic welding gun", price "40".
+_AMOUNT = r"\d{1,7}(?:[.,]\d{1,2})?"
+_PRICE = re.compile(
+    rf"\bfor\s+(?:only\s+|just\s+)?(?:[€$£]\s*(?P<a>{_AMOUNT})|(?P<b>{_AMOUNT})\s*(?P<cur>euros?|eur|€|dollars?|usd|\$"
+    rf"|pounds?|gbp|£)?(?![\w.,]))",
+    re.IGNORECASE,
+)
+_ARTICLES = frozenset({"a", "an", "my", "the", "this", "our", "some", "one"})
+
+
+def _item_and_price(goal: str) -> tuple[str | None, str | None]:
+    for match in _PRICE.finditer(goal):
+        amount = match.group("a") or match.group("b")
+        if not (match.group("a") or match.group("cur") or _SELLING.search(goal)):
+            continue  # a bare "for 10" is only a price when the goal is about selling
+        tail = goal[: match.start()].split()[-8:]
+        starts = [i for i, word in enumerate(tail) if word.lower() in _ARTICLES]
+        words = tail[starts[-1] + 1 :] if starts else tail[-3:]
+        item = " ".join(words).strip(" ,.;:!?\"'")
+        return (item if 2 <= len(item) <= 80 else None), amount
+    return None, None
+
 
 def slots_from_goal(goal: str) -> dict[str, str]:
     """Text the goal clearly asks to type, offered to Jev as choosable slots (Jev never writes text itself).
@@ -47,7 +105,10 @@ def slots_from_goal(goal: str) -> dict[str, str]:
     - quoted literals: 'type "hello world" into Notes' → {"quote_1": "hello world"}
     - the phrase after search/look up/look for/google/type/enter/say: "look for pictures of red flowers in Safari"
       → {"phrase_1": "pictures of red flowers"}
-    - URLs and domains: "go to apple.com" → {"url_1": "apple.com"}
+    - URLs and domains: "go to apple.com" → {"url_1": "apple.com"}; well-known sites: "go to facebook" →
+      {"url_1": "facebook.com"}
+    - an item and its price: "sell a plastic welding gun for 40 euros" → {"item_name": "plastic welding gun",
+      "price": "40"}
     """
     quoted = [next(g for g in match.groups() if g is not None) for match in _QUOTED.finditer(goal)]
     slots = {f"quote_{i}": value for i, value in enumerate(dict.fromkeys(quoted), start=1)}
@@ -61,8 +122,20 @@ def slots_from_goal(goal: str) -> dict[str, str]:
     for i, value in enumerate(dict.fromkeys(p for p in phrases if p not in quoted), start=1):
         slots[f"phrase_{i}"] = value
     urls = [m.group(0).rstrip(".,") for m in _URL.finditer(unquoted)]
+    lowered = unquoted.lower()
+    if "marketplace" in lowered and _SELLING.search(unquoted):
+        urls.append(MARKETPLACE_NEW_ITEM)  # straight to the "item for sale" form
+    for match in _SITE_NAMED.finditer(unquoted):
+        site = KNOWN_SITES.get(match.group("site").lower())
+        if site and not any(site in url for url in urls):
+            urls.append(site)
     for i, value in enumerate(dict.fromkeys(urls), start=1):
         slots[f"url_{i}"] = value
+    item, price = _item_and_price(unquoted)
+    if item:
+        slots["item_name"] = item
+    if price:
+        slots["price"] = price
     return slots
 
 

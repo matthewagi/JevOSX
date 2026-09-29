@@ -11,6 +11,7 @@ from jevosx.router.policy import JevRouter
 from jevosx.ui.demo import DemoDesktop, SimulatedJev
 from jevosx.ui.server import Components, EventBus, RunManager, RunOptions, UIServer, demo_logins
 from jevosx.writer.simulated import SimulatedWriter
+from tests.fakes import FB_GOAL
 
 
 def demo_settings():
@@ -65,6 +66,16 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
             lambda d: d.apps["TextEdit"].body.startswith("A poem about the sea") and d.apps["TextEdit"].document,
         ),
         ("write a haiku about rain in Notes", lambda d: d.apps["Notes"].notes[0].startswith("Rain arrives")),
+        (
+            FB_GOAL,
+            lambda d: (
+                d.apps["Safari"].listing is not None
+                and d.apps["Safari"].listing.get("Title") == "Plastic welding gun"
+                and d.apps["Safari"].listing.get("Price") == "40"
+                and len(d.apps["Safari"].listing.get("Description", "")) > 40
+                and not d.apps["Safari"].published
+            ),
+        ),
         (
             "Start a new game of Space Blocks on normal difficulty",
             lambda d: d.apps["Space Blocks"].screen == "playing" and d.apps["Space Blocks"].difficulty == "Normal",

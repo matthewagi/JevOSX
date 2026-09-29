@@ -357,11 +357,22 @@ jevosx write --check                     # is Apple's model ready? If not, it sa
 The writer never fills password fields. It gets screen text as context only, and it composes each field once per
 run, so a retry types the same text instead of a new poem. Goals that name the text (`type "hello"`) never use it.
 
-**Plans for multi-part goals.** For a goal such as "write a poem about autumn, save it as poem.rtf, then open it in
-Pages", the same on-device model writes a short numbered outline once per run (`agent.plan = "auto"`). Jev gets the
-outline as a hint for ordering, and it shows up as step 0 (`PLAN`) in the terminal and console. It never becomes
-an action: every step is still a Jev choice among observed ids, and if no plan comes back the run simply goes on
-without one.
+**Reading the request.** At the start of a run the same on-device model reads the whole request once
+(`agent.plan = "auto"`). It returns the steps and the exact values to type. For "go to facebook and prepare a
+product to sell on marketplace a plastic welding gun for 40 euros generic text" that is:
+
+- website `facebook.com/marketplace`;
+- title `Plastic welding gun`;
+- price `40`;
+- a ready-written description.
+
+The values become text slots that Jev can pick for the fields it chooses. The steps are a hint for ordering. Both
+show up as step 0 (`PLAN`) in the terminal and console. Neither ever becomes an action: every click and field is
+still a Jev choice among observed ids.
+
+Without a model, simple patterns take over: sites named without ".com" ("go to facebook"), "<item> for 40 euros",
+quoted text, URLs and the phrase after "search for". Passwords are never read from a request; they come only from
+the Keychain.
 
 ### Logging in to websites
 

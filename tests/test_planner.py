@@ -4,9 +4,9 @@ from jevosx.agent import Agent
 from jevosx.config import Settings
 from jevosx.errors import TextUnavailableError
 from jevosx.executor.keys import key_vocabulary
-from jevosx.planner import Planner, needs_plan, parse_plan
+from jevosx.planner import Planner, merge_slots, needs_plan, parse_plan, parse_reading
 from jevosx.router.policy import JevRouter
-from tests.fakes import FakeDesktop, element, observation, scripted_client
+from tests.fakes import FB_GOAL, FakeDesktop, element, observation, scripted_client
 
 
 @pytest.mark.parametrize(
@@ -80,3 +80,62 @@ def test_agent_shows_the_plan_and_sends_it_to_jev_as_a_hint():
     requests.clear()
     agent.run("Open Notes")
     assert "plan" not in requests[0]["state"]
+
+
+MODEL_ANSWER = """**STEPS:**
+1. Open facebook.com/marketplace in the browser
+2. Create a new listing: item for sale
+3. Fill in the title, price and description
+VALUES:
+- Website: https://www.facebook.com/marketplace/
+- Title: "Plastic welding gun"
+- Price: 40 euros
+- Description: Plastic welding gun in good condition, heats up fast, ideal for bumper and tank repairs.
+- Password: hunter2
+- Notes: none"""
+
+
+def test_reading_turns_a_free_form_request_into_steps_and_values():
+    steps, values = parse_reading(MODEL_ANSWER)
+    assert steps[0] == "Open facebook.com/marketplace in the browser" and len(steps) == 3
+    assert values == {
+        "website": "www.facebook.com/marketplace",
+        "title": "Plastic welding gun",
+        "price": "40",
+        "description": "Plastic welding gun in good condition, heats up fast, ideal for bumper and tank repairs.",
+    }  # the password line is dropped: passwords only ever come from the Keychain
+
+
+def test_reading_tolerates_missing_headers_and_empty_values():
+    assert parse_reading("1. Open Notes\n2. Make a new note") == (["Open Notes", "Make a new note"], {})
+    assert parse_reading("STEPS:\n1. a\n2. b\nVALUES: none") == (["a", "b"], {})
+    assert parse_reading("VALUES: search: population of Malta")[1] == {"search": "population of Malta"}
+
+
+def test_model_values_come_first_and_patterns_fill_gaps():
+    model = {"title": "Plastic welding gun", "price": "40"}
+    patterns = {"item_name": "plastic welding gun", "price": "41", "url_1": "facebook.com"}
+    assert merge_slots(model, patterns) == {"title": "Plastic welding gun", "price": "40", "url_1": "facebook.com"}
+
+
+def test_agent_offers_the_values_the_model_read_from_the_goal():
+    field = element(1, "AXTextField", "Title", kind="text_input", ops=("TYPE_TEXT", "CLICK"), in_web_area=True)
+    desktop = FakeDesktop({"form": lambda: observation([field, element(2, "AXButton", "Publish")])}, "form", {})
+    requests: list[dict] = []
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    writer = Writer(answer=MODEL_ANSWER)
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(lambda body: {"operation": "DONE"}, requests), keys=key_vocabulary()),
+        settings=settings,
+        text_writer=writer,
+        planner=Planner(writer),
+        sleep=lambda _s: None,
+    )
+    result = agent.run(FB_GOAL)
+    slots = requests[0]["state"]["text_slots"]
+    assert slots["title"] == "Plastic welding gun" and slots["price"] == "40" and "description" in slots
+    assert "password" not in slots and "GENERATE" in slots
+    assert "title “Plastic welding gun”" in result.events[0].message and "description (" in result.events[0].message

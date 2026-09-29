@@ -1,33 +1,69 @@
-"""On-device plan for multi-part goals: the writer's language model splits the goal into ordered steps, once per run.
+"""Reading the goal with a language model: the steps it implies and the exact text it needs typed, once per run.
 
-"Write a poem about autumn, save it as poem.rtf, then open it in Pages" is three tasks in one sentence. A System-One
-model decides fast from the current screen but has to infer from history which part is already done. The plan gives
-it the order. It is context only: a suggested outline from a small model, never a command. Every action is still a
-Jev choice among observed ids, and a failed or empty plan simply means no plan.
+Pattern matching cannot read "go to facebook and prepare a product to sell on marketplace a plastic welding gun for
+40 euros generic text" the way a person does. The writer's model (Apple's on-device model by default) reads it once
+and answers in a fixed format:
+
+    STEPS:
+    1. Open facebook.com/marketplace in the browser
+    2. Create a new listing and fill in title, price and description
+    VALUES:
+    website: facebook.com/marketplace
+    title: Plastic welding gun
+    price: 40
+    description: Plastic welding gun in good working order, ideal for repairing bumpers and tanks.
+
+The values become text slots that Jev can choose for the fields it picks; the steps become the plan (a hint for
+ordering). Nothing here acts: every click and every field is still a Jev choice among observed ids. When no model is
+available, or its answer cannot be used, the pattern-based slots in router/text.py are all there is.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import time
+from dataclasses import dataclass, field
 
 from .errors import JevOSXError, TextUnavailableError
+from .router.text import SECRET_NAME
+from .types import clean_text
 from .writer.base import TextWriter
 
 log = logging.getLogger("jevosx.planner")
 
-PLANNER_INSTRUCTIONS = """Split the user's request for their Mac into the concrete steps a person would take, in order.
-Write one short line per step, numbered 1., 2., 3. Use at most 6 steps. Name the app when it is clear.
-Only restate what the request asks for: do not add extra tasks, explanations, warnings or questions."""
+READER_INSTRUCTIONS = """You read a request that a person gave to an assistant that operates their Mac.
+Answer in exactly this format and nothing else:
+STEPS:
+1. <first step>
+2. <next step>
+VALUES:
+<name>: <text to type>
+
+STEPS: the concrete steps in order, at most 6, one short line each. Name the app or website when it is clear.
+Only what the request asks for: no extra tasks, warnings or questions.
+VALUES: every piece of text the assistant will have to type, one per line, each with a short lowercase name:
+- a website as a bare address, for example website: facebook.com
+- search words, for example search: population of Malta
+- names, titles, file names, recipients and dates exactly as the request gives them
+- amounts as numbers only, for example price: 40
+- when the request asks for new text (a description, a message, generic text, a poem), write that text in full as
+  the value, on one line, for example description: ...
+Never include passwords or codes. Never invent personal details (names, emails, phone numbers, addresses) that are
+not in the request. If nothing needs typing, write: VALUES: none"""
 
 _MULTI_PART = re.compile(r",|;|\bthen\b|\band\b|\bafter(?:wards)?\b|\bnext\b|\bfinally\b", re.IGNORECASE)
 _STEP = re.compile(r"^\s*(?:\d{1,2}\s*[.)]|[-•*])\s*(?P<text>.+?)\s*$")
+_VALUE = re.compile(r"^\s*(?:[-•*]\s*)?(?P<name>[A-Za-z][A-Za-z0-9 _-]{0,30}?)\s*[:=]\s*(?P<value>.+?)\s*$")
+_EMPTY = frozenset({"none", "n/a", "na", "-", "nothing", "null", "(none)"})
 MAX_STEPS = 6
-PLAN_TIMEOUT_S = 20.0  # a plan is optional: never hold a run up for long
+MAX_VALUES = 12
+MIN_WORDS = 4  # "Open Notes" needs no reading
+PLAN_TIMEOUT_S = 20.0  # optional help: never hold a run up for long
 
 
 def needs_plan(goal: str) -> bool:
-    """Only goals with several parts benefit; "Open Notes" does not need a plan."""
+    """Only goals with several parts benefit from a list of steps."""
     return len(goal.split()) >= 5 and bool(_MULTI_PART.search(goal))
 
 
@@ -45,19 +81,102 @@ def parse_plan(text: str) -> list[str]:
     return steps if len(steps) >= 2 else []
 
 
+def _slot_name(raw: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", raw.strip().lower()).strip("_")[:30]
+
+
+def parse_values(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = _VALUE.match(line.replace("**", ""))
+        if not match:
+            continue
+        name = _slot_name(match.group("name"))
+        value = match.group("value").strip().strip("\"'“”`").strip()
+        if not name or name in ("steps", "values") or value.lower() in _EMPTY or SECRET_NAME.search(name):
+            continue  # passwords come from the Keychain (jevosx login), never from a model
+        if name.startswith("website") or name in ("url", "address", "site"):
+            value = re.sub(r"^https?://", "", value).rstrip("/")
+        if re.search(r"price|amount|cost|quantity", name):
+            number = re.search(r"\d+(?:[.,]\d+)?", value)
+            value = number.group(0) if number else value  # "40 euros" → "40": price fields take numbers
+        if value and len(value) <= 2000 and name not in values:
+            values[name] = value
+        if len(values) == MAX_VALUES:
+            break
+    return values
+
+
+def parse_reading(text: str) -> tuple[list[str], dict[str, str]]:
+    """Split the model's answer into steps and values. Tolerates missing headers and markdown decoration."""
+    lines = [line.replace("**", "").replace("#", "") for line in text.splitlines()]
+    steps_part: list[str] = []
+    values_part: list[str] = []
+    section = "steps"
+    for line in lines:
+        head = line.strip().upper()
+        if head.startswith("STEPS"):
+            section = "steps"
+            continue
+        if head.startswith("VALUES"):
+            section = "values"
+            rest = line.split(":", 1)[1] if ":" in line else ""
+            if rest.strip():
+                values_part.append(rest)
+            continue
+        (steps_part if section == "steps" else values_part).append(line)
+    return parse_plan("\n".join(steps_part)), parse_values("\n".join(values_part))
+
+
+@dataclass
+class GoalReading:
+    steps: list[str] = field(default_factory=list)
+    values: dict[str, str] = field(default_factory=dict)
+    ms: float = 0.0
+
+    def summary(self) -> str:
+        parts = []
+        if self.steps:
+            parts.append(" · ".join(f"{i}. {step}" for i, step in enumerate(self.steps, start=1)))
+        if self.values:
+            shown = [
+                f"{name} ({len(value)} characters)" if len(value) > 60 else f"{name} “{value}”"
+                for name, value in self.values.items()
+            ]
+            parts.append("to type: " + ", ".join(shown))
+        return " · ".join(parts)
+
+
 class Planner:
+    """Reads a goal with the writer's model. Never raises: no model, a failure or an unusable answer → nothing."""
+
     def __init__(self, writer: TextWriter):
         self.writer = writer
 
-    def plan(self, goal: str) -> list[str]:
-        """Ordered steps for a multi-part goal, or [] (single-part goal, or the model failed). Never raises."""
-        if not needs_plan(goal):
-            return []
+    def read(self, goal: str) -> GoalReading:
+        if len(goal.split()) < MIN_WORDS:
+            return GoalReading()
+        started = time.perf_counter()
         try:
             text = self.writer.generate(
-                PLANNER_INSTRUCTIONS, f"Request: {goal}", max_tokens=200, temperature=0.2, timeout_s=PLAN_TIMEOUT_S
+                READER_INSTRUCTIONS, f"Request: {goal}", max_tokens=400, temperature=0.2, timeout_s=PLAN_TIMEOUT_S
             )
         except (TextUnavailableError, JevOSXError, OSError) as exc:
-            log.info("no plan: %s", exc)
-            return []
-        return parse_plan(text)
+            log.info("goal not read: %s", exc)
+            return GoalReading()
+        steps, values = parse_reading(text)
+        return GoalReading(steps, values, round((time.perf_counter() - started) * 1000, 1))
+
+    def plan(self, goal: str) -> list[str]:
+        """Just the ordered steps (multi-part goals only)."""
+        return self.read(goal).steps if needs_plan(goal) else []
+
+
+def merge_slots(model: dict[str, str], patterns: dict[str, str]) -> dict[str, str]:
+    """The model's values first; pattern-based slots only add what the model did not already cover."""
+    merged = dict(model)
+    known = {clean_text(v, 2000).lower() for v in model.values()}
+    for name, value in patterns.items():
+        if name not in merged and clean_text(value, 2000).lower() not in known:
+            merged[name] = value
+    return merged

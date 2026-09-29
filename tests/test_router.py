@@ -9,7 +9,7 @@ from jevosx.router.policy import JevRouter, build_state, state_size, validate_re
 from jevosx.router.space import ActionSpace
 from jevosx.router.text import GENERATE, TextSource, slots_from_goal
 from jevosx.types import AppInfo, UIElement, WindowInfo
-from tests.fakes import distribution, element, observation, scripted_client
+from tests.fakes import FB_GOAL, distribution, element, observation, scripted_client
 
 
 def sample_obs():
@@ -231,3 +231,54 @@ def test_idle_apps_that_fit_the_goal_are_offered_without_being_named():
     assert offered("search the web for red flowers") == set()  # a browser is already running
     assert offered("what is 17 times 23? calculate it") == {"Calculator"}
     assert offered("Open Mail") == {"Mail"}  # named apps still count
+
+
+@pytest.mark.parametrize(
+    ("goal", "expected"),
+    [
+        (
+            FB_GOAL,
+            {"url_1": "facebook.com/marketplace/create/item", "item_name": "plastic welding gun", "price": "40"},
+        ),
+        ("open youtube and play some jazz", {"url_1": "youtube.com"}),
+        ("sell my old bike for €120 on ebay", {"url_1": "ebay.com", "item_name": "old bike", "price": "120"}),
+        ("wait for 5 minutes then open notes", {}),  # a bare number is only a price when selling
+    ],
+)
+def test_sites_items_and_prices_become_choosable_text(goal, expected):
+    slots = slots_from_goal(goal)
+    assert {k: v for k, v in slots.items() if k in expected} == expected
+    assert set(expected) <= set(slots)
+
+
+def test_links_to_the_same_page_share_their_probability():
+    from jevosx.router.client import ChoiceAnswer
+    from jevosx.router.policy import same_destination
+    from jevosx.router.space import Target
+
+    def link(i, label, url):
+        el = element(i, "AXLink", label, in_web_area=True, url=url)
+        return Target(str(i), {"element": el.describe()}, f"el:{i}", element=el)
+
+    malta = "https://en.wikipedia.org/wiki/Demographics_of_Malta"
+    targets = {
+        "20": link(20, "Demographics of Malta on Wikipedia", malta + "#Population"),
+        "28": link(28, "Demographics of Malta", malta),
+        "31": link(31, "Malta - Worldometer", "https://www.worldometers.info/world-population/malta-population/"),
+    }
+    answer = ChoiceAnswer("28", {"20": 0.4, "28": 0.45, "31": 0.15}, 0.45)
+    merged = same_destination(answer, targets)
+    assert merged.choice == "28" and merged.confidence == pytest.approx(0.85)
+    other = same_destination(ChoiceAnswer("31", {"20": 0.4, "28": 0.25, "31": 0.35}, 0.35), targets)
+    assert other.confidence == 0.35  # a different page: nothing to combine
+    state = build_state(observation([targets["28"].element]))
+    assert state["elements"][0]["to"] == "en.wikipedia.org/wiki/Demographics_of_Malta"
+
+
+def test_publishing_a_listing_needs_confirmation():
+    from jevosx.executor.safety import SafetyPolicy
+    from jevosx.types import Action
+
+    publish = element(1, "AXButton", "Publish", in_web_area=True)
+    verdict = SafetyPolicy().check(Action("CLICK", element=publish), AppInfo("Google Chrome", "com.google.Chrome"))
+    assert verdict.verdict == "confirm"

@@ -87,6 +87,21 @@ def _certain(choice: str) -> ChoiceAnswer:
     return ChoiceAnswer(choice, {choice: 1.0}, 1.0)
 
 
+def same_destination(answer: ChoiceAnswer, targets: Mapping[str, Target]) -> ChoiceAnswer:
+    """Search results list the same page several times (title, breadcrumb, sitelink). When Jev spreads its
+    probability over links that all lead to the chosen link's page, the outcome is not in doubt: the confidence
+    becomes their combined probability (never lower than Jev's own)."""
+    chosen = targets[answer.choice].element
+    url = link_target(chosen.url) if chosen is not None else None
+    if not url:
+        return answer
+    same = [tid for tid, t in targets.items() if t.element is not None and link_target(t.element.url) == url]
+    if len(same) < 2:
+        return answer
+    combined = min(1.0, sum(answer.probabilities.get(tid, 0.0) for tid in same))
+    return ChoiceAnswer(answer.choice, answer.probabilities, max(answer.confidence, combined))
+
+
 class JevRouter:
     def __init__(
         self,
@@ -191,7 +206,7 @@ class JevRouter:
             if len(targets) == 1:
                 decision.target_answer = _certain(next(iter(targets)))
             else:
-                decision.target_answer = response.choice(head, targets)
+                decision.target_answer = same_destination(response.choice(head, targets), targets)
             decision.target = targets[decision.target_answer.choice]
         if decision.operation == TYPE_TEXT:
             options = text_source.options()
@@ -368,6 +383,22 @@ def element_state(element: Any) -> dict[str, Any]:
     states = element.states()
     if states:
         out["state"] = states
+    link = link_target(getattr(element, "url", None))
+    if link:
+        out["to"] = link
     if element.ops:
         out["ops"] = list(element.ops)
     return out
+
+
+def link_target(url: str | None) -> str | None:
+    """Host and path of a link, no scheme, query or fragment: "en.wikipedia.org/wiki/Malta"."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return clean_text(f"{parts.netloc}{parts.path}".rstrip("/"), 80)

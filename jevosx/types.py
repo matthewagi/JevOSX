@@ -159,6 +159,7 @@ class UIElement:
     shortcut: str | None = None
     in_web_area: bool = False
     value_settable: bool = False
+    url: str | None = None  # links: where they lead (scheme, host and path are shown to Jev)
     frame: Rect | None = field(default=None, repr=False)
     actions: tuple[str, ...] = field(default=(), repr=False)
     node: Any = field(default=None, repr=False, compare=False)

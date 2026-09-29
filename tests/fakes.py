@@ -153,6 +153,9 @@ class FakeDesktop:
 
 Answerer = Callable[[dict[str, Any]], dict[str, Any]]
 
+# A real request from a user, used across tests: a site named without ".com", an item, a price and "generic text".
+FB_GOAL = "go to facebook and prepare a product to sell on marketplace a plastic welding gun for 40 euros generic text"
+
 
 def distribution(ids: Sequence[str], choice: str, p: float = 0.9, confidence: float | None = None) -> dict[str, Any]:
     rest = (1 - p) / (len(ids) - 1) if len(ids) > 1 else 0.0

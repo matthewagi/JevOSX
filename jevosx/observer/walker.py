@@ -54,6 +54,7 @@ BATCH_ATTRS = (
     "AXPlaceholderValue",
     "AXHelp",
     "AXHidden",
+    "AXURL",  # links and web areas: where they lead (no extra round trip in the batched read)
 )
 
 # Roles that are actionable by their nature. Their AX actions are read lazily at execution time.
@@ -284,8 +285,7 @@ class TreeWalker:
 
             enabled = attrs.get("AXEnabled") is not False
             if role == "AXWebArea" and page_url is None and not frame.in_web:
-                with contextlib.suppress(StaleElementError):
-                    page_url = url_text(frame.node.get("AXURL"))
+                page_url = url_text(attrs.get("AXURL"))
 
             if role in TEXT_ROLES:
                 text = clean_text(attrs.get("AXValue") or attrs.get("AXTitle") or attrs.get("AXDescription"), 300)
@@ -494,6 +494,7 @@ class TreeWalker:
             identifier=identifier,
             in_web_area=frame.in_web,
             value_settable=value_settable,
+            url=url_text(attrs.get("AXURL")) if role == "AXLink" else None,
             frame=rect,
             actions=actions,
             node=node,

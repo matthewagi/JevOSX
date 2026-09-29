@@ -13,7 +13,7 @@ from jevosx.router.text import GENERATE, TextSource
 from jevosx.writer import clean_generated, create_writer, wants_generation, writer_prompt
 from jevosx.writer.apple import AppleWriter, WriterUnavailable, build_helper, helper_path
 from jevosx.writer.openai import LLMTextWriter
-from tests.fakes import FakeDesktop, element, observation, scripted_client
+from tests.fakes import FB_GOAL, FakeDesktop, element, observation, scripted_client
 
 
 @pytest.mark.parametrize(
@@ -29,6 +29,12 @@ from tests.fakes import FakeDesktop, element, observation, scripted_client
         ("search the web for pictures of red flowers", False),
         ("Open Downloads in Finder", False),
         ('Create a new document and type "hello"', False),
+        (
+            FB_GOAL,
+            True,
+        ),
+        ("add a short description to the listing", True),
+        ("look up the population of Malta on Wikipedia", False),
     ],
 )
 def test_wants_generation(goal, wanted):

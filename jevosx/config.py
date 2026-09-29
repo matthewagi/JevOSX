@@ -127,6 +127,9 @@ class SafetySettings:
             r"\btransfer\b",
             r"\bfactory reset\b",
             r"\bformat\b",
+            r"\bpublish\b",
+            r"\bpost\b",
+            r"\bsubmit\b",
         ]
     )
     deny_apps: list[str] = field(default_factory=lambda: ["com.apple.keychainaccess", "com.apple.Passwords"])
@@ -153,7 +156,7 @@ class AgentSettings:
     history_size: int = 8
     max_done_rejections: int = 2
     max_handoffs: int = 3  # ASK_USER hand-offs (2FA codes, CAPTCHAs…) per run
-    plan: str = "auto"  # auto: the writer's model outlines multi-part goals once per run (context for Jev) | off
+    plan: str = "auto"  # auto: the writer's model reads the goal once per run (steps + values to type) | off
 
 
 @dataclass

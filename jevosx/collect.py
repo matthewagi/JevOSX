@@ -279,7 +279,8 @@ class Collector:
 
 
 def save_photos(items: Sequence[Item], folder: Path, saver: ImageSaver | None = None) -> int:
-    """Download each item's picture as <n>.jpg-ish into `folder`; returns how many were saved."""
+    """Download each item's picture as 001.jpg, 002.png, … into `folder` (numbered like the results, so a re-run
+    replaces its own files); returns how many were saved."""
     saver = saver or ImageSaver()
     saved = 0
     for number, item in enumerate(items, start=1):
@@ -289,7 +290,9 @@ def save_photos(items: Sequence[Item], folder: Path, saver: ImageSaver | None = 
             path = saver.save(item.photo_url, folder, f"{number:03d}")
         except ImageSaveError:
             continue
-        item.photo = path.name
+        numbered = path.with_name(f"{number:03d}{path.suffix}")  # the saver names files "001 1.jpg"
+        path.replace(numbered)
+        item.photo = numbered.name
         saved += 1
     return saved
 

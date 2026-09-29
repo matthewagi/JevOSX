@@ -169,8 +169,11 @@ def test_saves_photos(tmp_path):
 
     saver = ImageSaver(httpx.Client(transport=httpx.MockTransport(serve)))
     assert save_photos(items, tmp_path, saver) == 4
-    assert items[0].photo and (tmp_path / items[0].photo).read_bytes() == PNG
+    assert items[0].photo == "001.png" and (tmp_path / "001.png").read_bytes() == PNG
     assert items[2].photo is None
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["001.png", "002.png", "004.png", "005.png"]
+    assert save_photos(items, tmp_path, saver) == 4  # a re-run replaces its own files
+    assert len(list(tmp_path.iterdir())) == 4
 
 
 def test_collect_command_is_offered():

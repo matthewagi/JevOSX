@@ -84,6 +84,7 @@ history_size = 8
 max_done_rejections = 2
 max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
 plan = "auto"                      # auto: the writer's model reads the request once: steps + values to type | off
+ask_first = true                   # ask you up front for what only you know (photos, condition…), max 3 questions
 background = true                  # work behind your window: keys borrow the work window briefly, then yours returns
 
 [writer]

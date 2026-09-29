@@ -38,6 +38,8 @@ STEPS:
 2. <next step>
 VALUES:
 <name>: <text to type>
+ASK:
+<name>: <question for the person>
 
 STEPS: the concrete steps in order, at most 6, one short line each. Name the app or website when it is clear.
 Only what the request asks for: no extra tasks, warnings or questions.
@@ -52,7 +54,13 @@ VALUES: every piece of text the assistant will have to type, one per line, each 
   not name it, for example category: Tools
 Never include passwords or codes. Never invent personal details (names, emails, phone numbers, addresses) or facts
 only the person knows (an item's condition, age or size) that are not in the request. If nothing needs typing,
-write: VALUES: none"""
+write: VALUES: none
+ASK: before starting, what the task cannot be finished without that the request does not give and only the person
+can know or provide: files to upload (for example photos of an item to sell), an item's condition, which account,
+a recipient. At most 3, one short question per line, each with a short lowercase name, for example
+photos: Where are the photos of the item saved?
+Not what you can decide yourself (a category, wording, a title), not preferences, never passwords. If nothing is
+missing, write: ASK: none"""
 
 _MULTI_PART = re.compile(r",|;|\bthen\b|\band\b|\bafter(?:wards)?\b|\bnext\b|\bfinally\b", re.IGNORECASE)
 _STEP = re.compile(r"^\s*(?:\d{1,2}\s*[.)]|[-•*])\s*(?P<text>.+?)\s*$")
@@ -109,25 +117,37 @@ def parse_values(text: str) -> dict[str, str]:
     return values
 
 
+MAX_QUESTIONS = 3
+
+
 def parse_reading(text: str) -> tuple[list[str], dict[str, str]]:
     """Split the model's answer into steps and values. Tolerates missing headers and markdown decoration."""
+    steps, values, _ = parse_sections(text)
+    return steps, values
+
+
+def parse_sections(text: str) -> tuple[list[str], dict[str, str], list[tuple[str, str]]]:
+    """Steps, values and the questions for the person (name, question)."""
     lines = [line.replace("**", "").replace("#", "") for line in text.splitlines()]
-    steps_part: list[str] = []
-    values_part: list[str] = []
+    parts: dict[str, list[str]] = {"steps": [], "values": [], "ask": []}
     section = "steps"
     for line in lines:
         head = line.strip().upper()
-        if head.startswith("STEPS"):
-            section = "steps"
-            continue
-        if head.startswith("VALUES"):
-            section = "values"
+        found = next((name for name in parts if head == name.upper() or head.startswith(name.upper() + ":")), None)
+        if found is not None:
+            section = found
             rest = line.split(":", 1)[1] if ":" in line else ""
-            if rest.strip():
-                values_part.append(rest)
+            if rest.strip() and found != "steps":
+                parts[found].append(rest)
             continue
-        (steps_part if section == "steps" else values_part).append(line)
-    return parse_plan("\n".join(steps_part)), parse_values("\n".join(values_part))
+        parts[section].append(line)
+    values = parse_values("\n".join(parts["values"]))
+    questions = [
+        (name, question if question.endswith("?") else question + "?")
+        for name, question in parse_values("\n".join(parts["ask"])).items()
+        if len(question) >= 8 and name not in values  # the request already answers it
+    ][:MAX_QUESTIONS]
+    return parse_plan("\n".join(parts["steps"])), values, questions
 
 
 @dataclass
@@ -135,6 +155,7 @@ class GoalReading:
     steps: list[str] = field(default_factory=list)
     values: dict[str, str] = field(default_factory=dict)
     ms: float = 0.0
+    questions: list[tuple[str, str]] = field(default_factory=list)  # (name, question) for the person, before starting
 
     def summary(self) -> str:
         parts = []
@@ -166,8 +187,8 @@ class Planner:
         except (TextUnavailableError, JevOSXError, OSError) as exc:
             log.info("goal not read: %s", exc)
             return GoalReading()
-        steps, values = parse_reading(text)
-        return GoalReading(steps, values, round((time.perf_counter() - started) * 1000, 1))
+        steps, values, questions = parse_sections(text)
+        return GoalReading(steps, values, round((time.perf_counter() - started) * 1000, 1), questions)
 
     def plan(self, goal: str) -> list[str]:
         """Just the ordered steps (multi-part goals only)."""

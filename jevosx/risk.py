@@ -46,7 +46,7 @@ SAFE, ROUTINE, CAREFUL = "safe", "routine", "careful"
 # Keys that move focus or the view, open a window or tab, or can be undone.
 SAFE_KEYS = frozenset(
     {"ESCAPE", "TAB", "SHIFT_TAB", "UP", "DOWN", "LEFT", "RIGHT", "PAGE_DOWN", "PAGE_UP", "CMD_A", "CMD_C", "CMD_F",
-     "CMD_L", "CMD_T", "CMD_N", "CMD_Z"}
+     "CMD_L", "CMD_T", "CMD_N", "CMD_Z", "CMD_SHIFT_G"}
 )  # fmt: skip
 CAREFUL_KEYS = frozenset({"CMD_W", "CMD_Q"})  # close a tab or window, quit: unsaved work can be lost
 # Clicking these opens a list, moves the cursor or selects: nothing is changed yet.

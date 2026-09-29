@@ -325,7 +325,7 @@ class Safari(DemoApp):
             Spec("AXTextField", "Title", value=form.get("Title", ""), container=page, web=True),
             Spec("AXTextField", "Price", value=form.get("Price", ""), container=page, web=True),
             Spec("AXComboBox", "Category", value=form.get("Category", ""), container=page, web=True),
-            Spec("AXPopUpButton", "Condition", value="New", container=page, web=True),
+            Spec("AXComboBox", "Condition", value=form.get("Condition", ""), container=page, web=True),
             Spec("AXTextArea", "Description", value=form.get("Description", ""), container=page, web=True),
             Spec("AXButton", "Publish", container=page, web=True),
         ]
@@ -406,7 +406,7 @@ class Safari(DemoApp):
         return f"opened {name}"
 
     def type(self, label: str, text: str) -> str:
-        if self.listing is not None and label in ("Title", "Price", "Category", "Description"):
+        if self.listing is not None and label in ("Title", "Price", "Category", "Condition", "Description"):
             self.listing[label] = text
         elif label == "Username or email address":
             self.username = text
@@ -837,12 +837,14 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
                 "title": ("title",),
                 "price": ("price",),
                 "category": ("category",),
+                "condition": ("condition",),
                 "description": ("description",),
             }
             for label, slot_names in wanted_slots.items():
                 if by_label[label].get("value") or TYPE_TEXT not in ops:
                     continue
-                slot = next((n for n in slot_names if n in offered), GENERATE if GENERATE in offered else None)
+                composed = GENERATE if GENERATE in offered and label == "description" else None  # never a condition
+                slot = next((n for n in slot_names if n in offered), composed)
                 field_id = _labelled(fields, label)
                 if slot and field_id:
                     return answer(TYPE_TEXT, 0.9, type_text_target=(field_id, 0.92), text_slot=(slot, 0.93))

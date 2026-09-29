@@ -64,6 +64,11 @@ class SimulatedWriter:
             title = values["title"].lower()
             values["category"] = next((c for c, words in _CATEGORIES if re.search(words, title)), "Miscellaneous")
         lines += [f"{name}: {value}" for name, value in values.items()] or ["none"]
+        lines.append("ASK:")
+        if "category" in values:  # selling: only the person knows what state the item is in
+            lines.append("condition: What condition is it in (new, used like new, used good, used fair)?")
+        else:
+            lines.append("none")
         return "\n".join(lines)
 
     def close(self) -> None:

@@ -407,6 +407,40 @@ Without a model, simple patterns take over: sites named without ".com" ("go to f
 quoted text, URLs and the phrase after "search for". Passwords are never read from a request; they come only from
 the Keychain.
 
+### Talking it through (questions and voice)
+
+**It asks what only you know, before it starts.** When the on-device model reads your request it also lists what the
+task cannot be finished without and only you can give: photos to upload, an item's condition, which account (at most
+three questions, never passwords). The console shows them in a *Before I start* card; answer what you can, leave the
+rest empty, and press Start. Your answers become text the agent can type. Things it can decide itself (a category, a
+title, the wording) it does not ask about. In a terminal the questions are asked in the terminal. Turn it off with
+`agent.ask_first = false`.
+
+**A "Your turn" card takes an answer in words.** When Jev needs information mid-run, type it into the card (or do the
+step on the Mac) and press *Done, continue*. What you typed becomes text the agent can use.
+
+**Voice.** Press the speaker button at the top of the console to turn voice on:
+
+- JevOSX says its questions, approvals ("Should I click Publish? Say yes or no."), hand-offs and results out loud, with
+  the Mac's own voice (`say`). To make it a Siri voice, choose one as the system voice in System Settings ›
+  Accessibility › Spoken Content.
+- It listens for your answer right after asking: "yes" or "no" for approvals, "done" or the answer for hand-offs,
+  an answer or "skip" for each question before starting.
+- The microphone button next to Run takes a spoken command (with voice on, it starts right away).
+
+Listening uses the browser's speech recognition, so use Chrome or Safari and allow the microphone for the console
+page. Chrome sends the audio to Google's speech service; Safari uses Apple's.
+
+**"Hey Siri, Ask JevOSX".** Siri cannot hold the conversation itself, but it can hand JevOSX the task:
+
+1. Open Shortcuts, create a shortcut named **Ask JevOSX**.
+2. Add **Dictate Text**, then **Run Shell Script** (shell `zsh`, pass input *as arguments*) with:
+   `$HOME/JevOSX/.venv/bin/jevosx ask "$@"`
+3. In Shortcuts › Settings › Advanced, allow running scripts.
+
+With `jevosx ui` open and voice on, "Hey Siri, Ask JevOSX", then "sell my welding gun on Marketplace for 40 euros",
+starts the run in the console, which then talks it through with you.
+
 ### Logging in to websites
 
 ```bash

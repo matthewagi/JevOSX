@@ -11,12 +11,16 @@ Standard library only (http.server + Server-Sent Events). Security model:
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hmac
 import json
 import logging
+import os
 import queue
 import secrets
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -197,6 +201,8 @@ class _Approval:
     event: threading.Event = field(default_factory=threading.Event)
     allowed: bool = False
     info: dict[str, Any] = field(default_factory=dict)
+    answer: str = ""  # a hand-off answered in words instead of on screen
+    answers: dict[str, str] = field(default_factory=dict)  # the questions asked before starting
 
 
 def code_version() -> float:
@@ -283,6 +289,7 @@ class RunManager:
                 logins=components.logins,
                 confirm=self._confirm,
                 handoff=self._handoff,
+                clarify=self._clarify,
             )
             run_id = secrets.token_hex(4)
             self.current = {
@@ -307,11 +314,15 @@ class RunManager:
             approval.allowed = False
             approval.event.set()
 
-    def approve(self, request_id: str, allowed: bool) -> bool:
+    def approve(
+        self, request_id: str, allowed: bool, *, answer: str = "", answers: dict[str, str] | None = None
+    ) -> bool:
         approval = self._approvals.get(request_id)
         if approval is None:
             return False
         approval.allowed = allowed
+        approval.answer = answer.strip()[:2000]
+        approval.answers = {k: v.strip()[:2000] for k, v in (answers or {}).items()}
         approval.event.set()
         return True
 
@@ -441,22 +452,38 @@ class RunManager:
     def _confirm(self, action: Action, reason: str) -> bool:
         """Called on the worker thread by the safety policy or the low-confidence 'ask' fallback."""
         category = "low_confidence" if "below the floor" in reason else "safety"
-        return self._ask(action.describe(), reason, category)
+        return self._ask(action.describe(), reason, category).allowed
 
-    def _handoff(self, request: str, _obs: Observation) -> bool:
-        """ASK_USER: the human does what only they can (2FA code, CAPTCHA…), then presses Continue (or Stop)."""
-        done = self._ask(
-            f"Please {request}.", "Do it on the Mac, then continue. Jev looks at the screen again.", "handoff"
+    def _handoff(self, request: str, _obs: Observation) -> bool | str:
+        """ASK_USER: the human does what only they can (2FA code, CAPTCHA…), then presses Continue (or Stop). Or
+        they type the answer, which the agent can then type itself."""
+        reply = self._ask(
+            f"Please {request}.",
+            "Do it on the Mac and continue, or type the answer here. Jev looks at the screen again.",
+            "handoff",
         )
         observer = self._components.observer if self._components is not None else None
         simulate = getattr(observer, "user_completes_handoff", None)
-        if done and self.demo and simulate is not None:
+        if reply.allowed and not reply.answer and self.demo and simulate is not None:
             simulate()  # demo: the simulated person types the code
-        return done
+        if not reply.allowed:
+            return False
+        return reply.answer or True
 
-    def _ask(self, action: str, reason: str, category: str) -> bool:
+    def _clarify(self, questions: list[tuple[str, str]]) -> dict[str, str] | None:
+        """Before starting: what only the person can provide. None stops the run; skipped questions stay empty."""
+        reply = self._ask(
+            "Before I start",
+            "A few things only you know. Answer what you can; empty answers are skipped.",
+            "questions",
+            questions=[{"name": name, "question": question} for name, question in questions],
+        )
+        return reply.answers if reply.allowed else None
+
+    def _ask(self, action: str, reason: str, category: str, **extra: Any) -> _Approval:
         request_id = secrets.token_hex(4)
-        approval = _Approval(info={"request_id": request_id, "action": action, "reason": reason, "category": category})
+        info = {"request_id": request_id, "action": action, "reason": reason, "category": category, **extra}
+        approval = _Approval(info=info)
         self._approvals[request_id] = approval
         self.bus.publish("approval", run_id=self.current["id"] if self.current else None, **approval.info)
         deadline = time.monotonic() + APPROVAL_TIMEOUT_S
@@ -465,7 +492,7 @@ class RunManager:
                 break
         self._approvals.pop(request_id, None)
         self.bus.publish("approval_resolved", request_id=request_id, allowed=approval.allowed)
-        return approval.allowed
+        return approval
 
     @staticmethod
     def _public(run: dict[str, Any]) -> dict[str, Any]:
@@ -485,6 +512,43 @@ def observation_json(obs: Observation) -> dict[str, Any]:
         "stats": {k: v for k, v in obs.stats.items() if isinstance(v, int | float | str | bool)},
         "captured_at": obs.captured_at,
     }
+
+
+class Speaker:
+    """Speaks the console's questions and results with the Mac's own voice (`say`: the system voice, which can be a
+    Siri voice, set in System Settings › Accessibility › Spoken Content). One sentence at a time; a new one cuts off
+    the previous. Returns once the sentence is spoken, so the page can listen right after."""
+
+    MAX_CHARS = 400
+
+    def __init__(self, command: str | None = None) -> None:
+        self.command = command if command is not None else (shutil.which("say") if sys.platform == "darwin" else None)
+        self._lock = threading.Lock()
+        self._current: subprocess.Popen[bytes] | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.command)
+
+    def say(self, text: str, *, timeout_s: float = 60.0) -> bool:
+        text = " ".join(text.split())[: self.MAX_CHARS]
+        if not self.command or not text:
+            return False
+        with self._lock:
+            if self._current is not None and self._current.poll() is None:
+                self._current.terminate()
+            process = subprocess.Popen([self.command, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._current = process
+        try:
+            process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+        return process.returncode == 0
+
+
+def console_file() -> Path:
+    """Where a running console leaves its address and token for `jevosx ask` (readable by this user only)."""
+    return Path("~/.jevosx/console.json").expanduser()
 
 
 # ---- HTTP ---------------------------------------------------------------------------------------------------------
@@ -509,6 +573,7 @@ class UIServer:
     ):
         self.token = secrets.token_urlsafe(18)
         self.demo = demo
+        self.speaker = Speaker()
         self.bus = manager.bus if manager else EventBus()
         self.manager = manager or RunManager(settings, demo=demo, bus=self.bus)
         server = self
@@ -597,7 +662,7 @@ class _Handler(BaseHTTPRequestHandler):
             if url.path == "/api/events":
                 return self._events()
             if url.path == "/api/status":
-                return self._send_json(manager.status())
+                return self._send_json({**manager.status(), "speech": self.ui.speaker.available})
             if url.path == "/api/state":
                 return self._send_json(manager.state())
             if url.path == "/api/observe":
@@ -623,8 +688,19 @@ class _Handler(BaseHTTPRequestHandler):
             if url.path == "/api/stop":
                 manager.stop()
                 return self._send_json({"stopping": manager.running})
+            if url.path == "/api/say":
+                text = data.get("text")
+                if not isinstance(text, str):
+                    raise ValueError("text is required")
+                return self._send_json({"ok": self.ui.speaker.say(text)})
             if url.path == "/api/approve":
-                ok = manager.approve(str(data.get("request_id", "")), bool(data.get("allow", False)))
+                answer, answers = data.get("answer") or "", data.get("answers") or {}
+                if not isinstance(answer, str) or not isinstance(answers, dict):
+                    raise ValueError("answer must be text and answers a map of text")
+                answers = {str(k): str(v) for k, v in answers.items() if isinstance(v, str | int | float)}
+                ok = manager.approve(
+                    str(data.get("request_id", "")), bool(data.get("allow", False)), answer=answer, answers=answers
+                )
                 return self._send_json({"ok": ok}, HTTPStatus.OK if ok else HTTPStatus.NOT_FOUND)
             if url.path == "/api/memory/label":
                 episode, status = data.get("episode_id"), data.get("status")
@@ -707,13 +783,28 @@ def serve(settings: Settings, *, demo: bool, host: str, port: int, open_browser:
         # Connect to the Mac and prepare the writer (a one-time Swift build) while the page loads, so the first
         # command does not wait for it. Failures are reported again when a run starts.
         threading.Thread(target=_warm_up, args=(server.manager,), daemon=True).start()
+    announce(link, server.token)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nstopping…")
     finally:
         server.shutdown()
+        with contextlib.suppress(OSError):
+            console_file().unlink()
     return 0
+
+
+def announce(url: str, token: str) -> None:
+    """Leave the console's address and token for `jevosx ask` (so a Siri Shortcut can start runs)."""
+    path = console_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump({"url": url, "token": token, "pid": os.getpid()}, out)
+    except OSError as exc:
+        log.info("cannot write %s: %s", path, exc)
 
 
 def _warm_up(manager: RunManager) -> None:

@@ -167,6 +167,9 @@ class AgentSettings:
     max_done_rejections: int = 2
     max_handoffs: int = 3  # ASK_USER hand-offs (2FA codes, CAPTCHAs…) per run
     plan: str = "auto"  # auto: the writer's model reads the goal once per run (steps + values to type) | off
+    # Before starting, ask the person what only they can provide (photos, an item's condition…), as the goal reader
+    # found it missing. Needs someone to answer: the console or an interactive terminal.
+    ask_first: bool = True
     # Work behind your window: the agent keeps its own work window and reads it where it is. Clicks and field writes
     # go through Accessibility without bringing it forward; for key presses it comes forward briefly, and then
     # whatever you were using (the console, Terminal…) is brought back. false: the agent works in front, as before.

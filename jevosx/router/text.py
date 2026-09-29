@@ -242,6 +242,16 @@ class TextSource:
     def available(self) -> bool:
         return bool(self.slots) or self.generate
 
+    def add(self, name: str, value: str) -> str:
+        """A text the person gave during the run (an answer). Returns the slot's name (made unique)."""
+        base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "answer"
+        unique, n = base, 1
+        while unique in self.slots and self.slots[unique].value != value:
+            n += 1
+            unique = f"{base}_{n}"
+        self.slots[unique] = TextSlot(unique, value)
+        return unique
+
     def set_credentials(self, slots: Iterable[TextSlot]) -> None:
         """Replace the site-bound login slots (they follow the page on screen, see jevosx.logins)."""
         for name in [name for name, slot in self.slots.items() if slot.host is not None]:

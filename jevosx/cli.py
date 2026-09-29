@@ -85,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     ui.set_defaults(handler=cmd_ui)
 
+    ask = sub.add_parser("ask", help="give the running console a command (for a Siri Shortcut: Hey Siri, Ask JevOSX)")
+    ask.add_argument("goal", nargs="+", help="what to do, e.g. sell the welding gun on Marketplace")
+    ask.set_defaults(handler=cmd_ask)
+
     diagnose = sub.add_parser("diagnose", help="report exactly what the agent can read from the frontmost window")
     diagnose.add_argument("--delay", type=float, default=3.0, help="seconds to switch to the app first (default 3)")
     diagnose.add_argument("--app", help='check this running app directly, e.g. --app "Google Chrome" (no clicking)')
@@ -180,10 +184,22 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
         print(f"starting in {args.delay:.1f}s…")
         time.sleep(args.delay)
 
-    def handoff(request: str, _obs: Any) -> bool:
+    def handoff(request: str, _obs: Any) -> bool | str:
         print(f"  ⏸ Jev needs you to {request}.")
-        answer = input("    Do it on the Mac, then press Enter to continue (or type stop): ").strip().lower()
-        return answer not in ("stop", "s", "q", "quit", "n", "no")
+        answer = input("    Do it on the Mac and press Enter, or type the answer (or stop): ").strip()
+        if answer.lower() in ("stop", "s", "q", "quit", "n", "no"):
+            return False
+        return answer or True
+
+    def clarify(questions: list[tuple[str, str]]) -> dict[str, str] | None:
+        print("  Before I start (press Enter to skip a question, type stop to cancel):")
+        answers: dict[str, str] = {}
+        for name, question in questions:
+            answer = input(f"    {question} ").strip()
+            if answer.lower() == "stop":
+                return None
+            answers[name] = answer
+        return answers
 
     agent = Agent.from_settings(
         settings,
@@ -191,6 +207,7 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
         use_memory=not args.no_memory,
         confirm=confirm,
         handoff=handoff if interactive else None,
+        clarify=clarify if interactive else None,
         notify=_notify,
     )
     max_steps = 1 if args.dry_run and not args.max_steps else args.max_steps
@@ -288,6 +305,38 @@ def cmd_ui(args: argparse.Namespace, settings: Settings) -> int:
     from .ui import serve
 
     return serve(settings, demo=args.demo, host=args.host, port=args.port, open_browser=not args.no_browser)
+
+
+def cmd_ask(args: argparse.Namespace, settings: Settings) -> int:
+    """Start a run in the console that is already open (`jevosx ui`), which then talks it through with you."""
+    import urllib.error
+    import urllib.request
+
+    from .ui.server import console_file
+
+    goal = " ".join(args.goal).strip()
+    try:
+        console = json.loads(console_file().read_text(encoding="utf-8"))
+        request = urllib.request.Request(
+            console["url"].rstrip("/") + "/api/run",
+            data=json.dumps({"goal": goal}).encode(),
+            headers={"Content-Type": "application/json", "X-JevOSX-Token": console["token"]},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            json.loads(response.read() or b"{}")
+    except FileNotFoundError:
+        print("the console is not running: start it with jevosx ui", file=sys.stderr)
+        return 2
+    except urllib.error.HTTPError as exc:
+        detail = json.loads(exc.read() or b"{}").get("error", exc.reason)
+        print(f"the console refused: {detail}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"cannot reach the console ({exc}): is jevosx ui still running?", file=sys.stderr)
+        return 2
+    print(f"started: {goal}")
+    return 0
 
 
 # ---- diagnose ----------------------------------------------------------------------------------------------------

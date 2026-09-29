@@ -98,6 +98,7 @@ DEFAULT_KEYS: tuple[tuple[str, str, str], ...] = (
     ("CMD_W", "cmd+w", "Close the current tab or window"),
     ("CMD_S", "cmd+s", "Save"),
     ("CMD_Q", "cmd+q", "Quit the frontmost app"),
+    ("CMD_SHIFT_G", "cmd+shift+g", "Go to folder: type a file or folder path in an Open or Save dialog"),
 )
 
 

@@ -159,6 +159,23 @@ the outcome.
   agent hands those to you (`ASK_USER`, "provide information the goal does not include").
 - Next: calibrate the tiers from the fallback log (how often an approved step was right) instead of fixed numbers.
 
+## Phase 7: talking it through (done)
+
+Asked for: only steps with consequences should need confidence or approval (publishing, sending, failed logins);
+the agent should find out what it is missing before it starts and ask only for the essentials; and it should talk.
+
+- **Consequences decide.** Safe steps need 0.2, routine clicks 0.3; publishing, sending, paying, deleting,
+  quitting keep 0.65 and ask. A second sign-in attempt in a run (after a password was typed) always asks, because
+  repeated failures can lock the account.
+- **Ask first.** The goal reader lists at most three things only the person can give (photos, condition, which
+  account). The console asks them in one card before starting; answers become text slots.
+- **Answerable hand-offs.** "Your turn" takes a typed or spoken answer, which becomes a text slot.
+- **Voice.** The console speaks questions, approvals and results with the Mac's voice (a Siri voice when chosen as
+  the system voice) and listens for yes/no, done, or the answer. `jevosx ask` lets a Siri Shortcut start runs.
+- **Photos.** `CMD_SHIFT_G` (Go to folder) lets the agent type the path you gave into an Open dialog.
+- Next: decide between "look first" and "ask first" per task (open the form, read which fields are required, then
+  ask), with a web search when the model does not know what a site needs.
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

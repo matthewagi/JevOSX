@@ -55,6 +55,10 @@ button { cursor: pointer; }
            background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
 .iconbtn:hover { color: var(--text); border-color: var(--border-2); }
 .iconbtn svg { width: 16px; height: 16px; }
+.iconbtn.active { color: var(--accent); border-color: var(--accent); }
+.iconbtn.listening { color: #fff; background: var(--bad, #e5484d); border-color: transparent; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .iconbtn.listening { animation: none; } }
 
 /* ---------- layout ---------- */
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 18px; padding: 18px 20px 0;
@@ -144,6 +148,11 @@ details.more summary:hover { color: var(--muted); }
 .approval.resolved { opacity: .7; padding: 8px 14px; }
 .approval.resolved .row { margin-top: 4px; }
 .approval-item { list-style: none; }
+.approval .q { display: grid; gap: 4px; margin: 8px 0; font-size: 13px; }
+.approval input.answer { width: 100%; border: 1px solid var(--border-2); background: var(--panel); border-radius: 8px;
+                         padding: 7px 10px; margin-top: 6px; }
+.approval input.answer:focus { outline: none; border-color: var(--accent); }
+.approval.resolved input.answer { opacity: .8; }
 .btn { border: 1px solid var(--border-2); background: var(--panel-2); border-radius: 10px; padding: 7px 14px; font-weight: 600; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
@@ -251,6 +260,9 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
     <span id="mode" class="mode"></span>
   </div>
   <div id="checks" class="checks"></div>
+  <button id="voice" class="iconbtn" title="Voice: JevOSX speaks its questions and results, and listens for your answers" aria-label="Voice" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+  </button>
   <button id="theme" class="iconbtn" title="Toggle theme" aria-label="Toggle theme">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
   </button>
@@ -272,6 +284,9 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
       <div class="inputrow">
         <textarea id="goal" rows="1" placeholder='Tell your Mac what to do… e.g. In Safari, search for "accessibility API"'></textarea>
         <div class="actions">
+          <button type="button" id="mic" class="iconbtn" title="Speak your command" aria-label="Speak your command">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
           <button type="button" id="toggle-options" class="iconbtn" title="Options" aria-label="Options">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
           </button>
@@ -313,10 +328,10 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const OP_COLOR = { CLICK: "--op-click", TYPE_TEXT: "--op-type", MENU: "--op-menu", PRESS_KEY: "--op-key",
   OPEN_APP: "--op-app", FOCUS_WINDOW: "--op-app", SCROLL_UP: "--op-scroll", SCROLL_DOWN: "--op-scroll",
-  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn", PLAN: "--accent-2" };
+  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn", PLAN: "--accent-2", ASK: "--warn" };
 const STATUS_TEXT = { acted: "executed", wait: "waited", done: "goal complete", blocked: "blocked", denied: "refused by safety",
   declined: "declined", stale: "UI changed, re-observed", low_confidence: "withheld (low confidence)", failed: "failed",
-  handoff: "handed to you", plan: "outline from the on-device model" };
+  handoff: "handed to you", plan: "outline from the on-device model", ask: "asked you first" };
 const RUN_TEXT = { running: "Running", success: "Verified", done: "Done", blocked: "Blocked", low_confidence: "Low confidence",
   failed: "Failed", max_steps: "Out of steps", aborted: "Stopped", error: "Error" };
 const EXAMPLES = [
@@ -383,7 +398,7 @@ function logLine(kind, text, cls = "") {
 /* ---------- status bar ---------- */
 async function refreshStatus() {
   try {
-    const s = await api("/api/status"); state.status = s;
+    const s = await api("/api/status"); state.status = s; voice.serverSpeech = Boolean(s.speech);
     $("#mode").textContent = s.demo ? "DEMO" : "LIVE"; $("#mode").className = "mode " + (s.demo ? "demo" : "live");
     const checks = $("#checks"); checks.replaceChildren();
     for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok === true ? "ok" : c.ok === false ? "bad" : ""), title: c.detail }, h("span", { class: "dot" }), c.name));
@@ -463,7 +478,7 @@ function addStep(entry, ev) {
     h("div", {}, `${x.kind} · ${x.operation}${x.target ? " " + x.target : ""} · ${x.past_runs} run(s) · sim ${x.similarity}`))));
   const details = alts.length || ev.message ? h("details", { class: "more" }, h("summary", {}, "details"),
     ev.message ? h("div", { class: "outcome", style: "margin-top:6px" }, ev.message) : null, alts.length ? h("div", { class: "alts" }, alts) : null) : null;
-  const retry = entry.lastStep === ev.step;  // same step number again: a withheld or re-observed attempt
+  const retry = entry.lastStep === ev.step && ev.step > 0;  // same step number again: a withheld or re-observed attempt
   entry.lastStep = ev.step;
   const li = h("li", { class: "step" },
     h("span", { class: "num", title: retry ? `step ${ev.step}, another attempt` : `step ${ev.step}` }, retry ? "↻" : String(ev.step)),
@@ -475,29 +490,47 @@ function addStep(entry, ev) {
   scrollFeed();
 }
 function addApproval(entry, a) {
-  const handoff = a.category === "handoff";
-  const kindTitle = handoff ? "Your turn: Jev needs you" : a.category === "low_confidence" ? "Jev is unsure: approve this step?" : "This step needs your approval";
-  const allow = h("button", { class: "btn ok", type: "button" }, handoff ? "Done, continue" : "Allow");
-  const deny = h("button", { class: "btn danger", type: "button" }, handoff ? "Stop the run" : "Deny");
-  const icon = handoff ? ICON.hand : a.category === "low_confidence" ? ICON.gauge : ICON.shield;
-  const box = h("div", { class: "approval" + (handoff ? " handoff" : "") }, h("h4", {}, svg(icon, 15), kindTitle),
-    h("div", { class: "act" }, a.action), h("div", { class: "muted", style: "font-size:12.5px" }, a.reason), h("div", { class: "row" }, allow, deny));
+  const handoff = a.category === "handoff", questions = a.category === "questions";
+  const kindTitle = questions ? "Before I start" : handoff ? "Your turn: Jev needs you"
+    : a.category === "low_confidence" ? "Jev is unsure: approve this step?" : "This step needs your approval";
+  const allow = h("button", { class: "btn ok", type: "button" }, questions ? "Start" : handoff ? "Done, continue" : "Allow");
+  const deny = h("button", { class: "btn danger", type: "button" }, questions || handoff ? "Stop the run" : "Deny");
+  const icon = handoff || questions ? ICON.hand : a.category === "low_confidence" ? ICON.gauge : ICON.shield;
+  const fields = (a.questions || []).map((q) => ({ name: q.name, question: q.question,
+    input: h("input", { type: "text", class: "answer", placeholder: "your answer, or leave it empty" }) }));
+  const typed = handoff ? h("input", { type: "text", class: "answer", placeholder: "…or type the answer here and press Done" }) : null;
+  const body = questions ? fields.map((f) => h("label", { class: "q" }, h("span", {}, f.question), f.input))
+    : [h("div", { class: "act" }, a.action)];
+  const box = h("div", { class: "approval" + (handoff || questions ? " handoff" : "") }, h("h4", {}, svg(icon, 15), kindTitle),
+    ...body, h("div", { class: "muted reason", style: "font-size:12.5px" }, a.reason), typed, h("div", { class: "row" }, allow, deny));
   const answer = async (ok) => {
     allow.disabled = deny.disabled = true;
-    try { await api("/api/approve", { request_id: a.request_id, allow: ok }); } catch (e) { toast(e.message); allow.disabled = deny.disabled = false; }
+    const payload = { request_id: a.request_id, allow: ok };
+    if (questions) payload.answers = Object.fromEntries(fields.map((f) => [f.name, f.input.value]));
+    if (typed) payload.answer = typed.value;
+    try { await api("/api/approve", payload); } catch (e) { toast(e.message); allow.disabled = deny.disabled = false; }
   };
   allow.onclick = () => answer(true); deny.onclick = () => answer(false);
+  for (const input of [...fields.map((f) => f.input), typed].filter(Boolean))
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); answer(true); } });
+  box.dataset.category = a.category;
   entry.steps.append(h("li", { class: "approval-item" }, box)); entry.approvals.set(a.request_id, box);
+  (fields[0]?.input || typed)?.focus();
   scrollFeed();
+  voice.announce(a, box, answer, fields, typed);
 }
 function resolveApproval(requestId, allowed) {
   for (const entry of state.runs.values()) {
     const box = entry.approvals.get(requestId);
     if (!box) continue;
-    const handoff = box.classList.contains("handoff");
-    const text = handoff ? (allowed ? "Continued" : "Stopped") : allowed ? "Allowed" : "Denied";
+    const handoff = box.classList.contains("handoff"), questions = box.dataset.category === "questions";
+    const answered = $$("input.answer", box).some((i) => i.value.trim());
+    const text = questions ? (allowed ? "Answered, starting" : "Stopped") : handoff ? (allowed ? (answered ? "Answered" : "Continued") : "Stopped")
+      : allowed ? "Allowed" : "Denied";
     box.classList.add("resolved"); $(".row", box).replaceChildren(h("span", { class: allowed ? "outcome good" : "outcome bad" }, text));
-    const reason = $(".muted", box); if (reason) reason.remove();
+    const reason = $(".reason", box); if (reason) reason.remove();
+    for (const input of $$("input.answer", box)) input.disabled = true;
+    voice.stopListening();
   }
 }
 function finishRun(entry, result) {
@@ -565,6 +598,7 @@ function connect() {
   es.addEventListener("run_finished", (m) => {
     const { run_id, result } = JSON.parse(m.data); const entry = state.runs.get(run_id);
     if (entry) finishRun(entry, result); setRunning(false); refreshStatus(); scheduleScreen();
+    if (voice.on) voice.say(`${RUN_TEXT[result.status] || result.status}. ${result.message || ""}`);
     logLine("finished", `${result.status} after ${result.steps} step(s) ${result.message ? "— " + result.message : ""}`, result.ok ? "k" : "w");
   });
   es.addEventListener("run_error", (m) => { const e = JSON.parse(m.data); const entry = state.runs.get(e.run_id);
@@ -652,6 +686,105 @@ async function submit(goalText) {
 }
 function autosize() { const g = $("#goal"); g.style.height = "auto"; g.style.height = Math.min(180, g.scrollHeight) + "px"; }
 
+/* ---------- voice ---------- */
+// Speaking: the Mac's own voice through the console (`say`, the system voice: can be a Siri voice), or the browser's.
+// Listening: the browser's speech recognition (Chrome, Safari). Nothing here runs unless you turn voice on or press
+// the microphone.
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const YES = /^(yes|yeah|yep|sure|ok|okay|go|go ahead|do it|allow|please do|correct)\b/i;
+const NO = /^(no|nope|don'?t|do not|stop|deny|cancel|wait|not now)\b/i;
+const DONE_WORDS = /^(done|finished|continue|ok|okay|i'?m done|go on|carry on)\b/i;
+const SKIP_WORDS = /^(skip|next|no idea|i don'?t know|don'?t know|pass)\b/i;
+function plain(action) {  // 'CLICK [4] button "Publish"' → 'click Publish'
+  const m = /^(\w+)\s+(?:\[\w+\]\s+)?(?:[a-z ]+?\s)?"([^"]+)"/.exec(action || "");
+  if (m) return `${m[1].toLowerCase().replace("_", " ")} ${m[2]}`;
+  return (action || "").replace(/\[[^\]]*\]\s*/g, "").replace(/\s+/g, " ").trim();
+}
+const voice = {
+  on: false, rec: null, serverSpeech: false, onInterim: null,
+  init() {
+    try { this.on = localStorage.getItem("jevosx-voice") === "on"; } catch (_) {}
+    if (!Recognition) { $("#mic").disabled = true; $("#mic").title = "Speaking commands needs Chrome or Safari"; }
+    $("#voice").onclick = () => this.toggle();
+    $("#mic").onclick = () => this.dictateGoal();
+    this.render();
+  },
+  toggle() {
+    this.on = !this.on;
+    try { localStorage.setItem("jevosx-voice", this.on ? "on" : "off"); } catch (_) {}
+    this.render();
+    if (this.on) this.say("Voice is on. Press the microphone and tell me what to do."); else this.stop();
+  },
+  render() { $("#voice").classList.toggle("active", this.on); $("#voice").setAttribute("aria-pressed", String(this.on)); },
+  async say(text) {  // resolves once spoken, so listening starts after, not over it
+    if (!text) return;
+    if (this.serverSpeech) { try { if ((await api("/api/say", { text })).ok) return; } catch (_) {} }
+    if (!window.speechSynthesis) return;
+    await new Promise((resolve) => { const u = new SpeechSynthesisUtterance(text); u.onend = u.onerror = resolve;
+      speechSynthesis.cancel(); speechSynthesis.speak(u); setTimeout(resolve, 20000); });
+  },
+  listen() {  // one utterance → its text ("" when nothing was heard)
+    return new Promise((resolve) => {
+      if (!Recognition) return resolve("");
+      this.stopListening();
+      const rec = new Recognition(); this.rec = rec;
+      rec.lang = navigator.language || "en-US"; rec.interimResults = true; rec.maxAlternatives = 1;
+      let heard = ""; $("#mic").classList.add("listening");
+      rec.onresult = (e) => { heard = [...e.results].map((r) => r[0].transcript).join(" "); this.onInterim?.(heard); };
+      rec.onerror = () => {};  // onend follows
+      rec.onend = () => { $("#mic").classList.remove("listening"); if (this.rec === rec) this.rec = null; resolve(heard.trim()); };
+      try { rec.start(); } catch (_) { $("#mic").classList.remove("listening"); resolve(""); }
+    });
+  },
+  stopListening() { if (this.rec) { try { this.rec.abort(); } catch (_) {} this.rec = null; } $("#mic")?.classList.remove("listening"); },
+  stop() { this.stopListening(); try { speechSynthesis.cancel(); } catch (_) {} },
+  async dictateGoal() {
+    if (!Recognition) return;
+    if (this.rec) return this.stopListening();
+    const goal = $("#goal");
+    this.onInterim = (t) => { goal.value = t; autosize(); };
+    const heard = await this.listen(); this.onInterim = null;
+    if (!heard) return;
+    goal.value = heard; autosize();
+    if (this.on) { this.say("On it."); submit(heard); }
+  },
+  async announce(a, box, answer, fields, typed) {  // talk an approval, question or hand-off through
+    if (!this.on) return;
+    const open = () => !box.classList.contains("resolved");
+    if (a.category === "questions") {
+      await this.say("Before I start, a few questions. Say skip to leave one out.");
+      for (const f of fields) {
+        if (!open()) return;
+        await this.say(f.question);
+        this.onInterim = (t) => { f.input.value = t; };
+        const heard = await this.listen(); this.onInterim = null;
+        if (!open()) return;
+        if (NO.test(heard) && /^(stop|cancel)/i.test(heard)) return answer(false);
+        f.input.value = heard && !SKIP_WORDS.test(heard) ? heard : "";
+      }
+      if (open()) { await this.say("Thanks, starting now."); answer(true); }
+      return;
+    }
+    const handoff = a.category === "handoff";
+    const ask = handoff ? `Your turn. ${plain(a.action)} Say done when you are finished, or tell me the answer.`
+      : a.category === "low_confidence" ? `I'm not sure about this one. Should I ${plain(a.action)}? Say yes or no.`
+      : `Should I ${plain(a.action)}? Say yes or no.`;
+    for (let attempt = 0; attempt < 3 && open(); attempt++) {
+      await this.say(attempt ? (handoff ? "Say done, stop, or the answer." : "Sorry, yes or no?") : ask);
+      const heard = await this.listen();
+      if (!open()) return;
+      if (handoff) {
+        if (/^(stop|cancel)\b/i.test(heard)) return answer(false);
+        if (DONE_WORDS.test(heard)) return answer(true);
+        if (heard) { typed.value = heard; return answer(true); }
+      } else {
+        if (YES.test(heard)) return answer(true);
+        if (NO.test(heard)) return answer(false);
+      }
+    }
+  },
+};
+
 /* ---------- boot ---------- */
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
 function init() {
@@ -667,6 +800,7 @@ function init() {
   $("#stop").onclick = async () => { try { await api("/api/stop", {}); toast("Stopping after the current step…"); } catch (e) { toast(e.message); } };
   document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "." && state.running) $("#stop").click(); });
   $("#toggle-options").onclick = () => $("#options").classList.toggle("hidden");
+  voice.init();
   $("#opt-floor").addEventListener("input", (e) => { $("#opt-floor-v").textContent = Number(e.target.value).toFixed(2); state.floor = Number(e.target.value); });
   for (const b of $$("#opt-policy button")) b.onclick = () => setPolicy(b.dataset.v);
   for (const b of $$(".tabs button")) b.onclick = () => showTab(b.dataset.tab);

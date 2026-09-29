@@ -35,12 +35,18 @@ def make_manager():
     return RunManager(demo_settings(), demo=True, bus=bus, builder=builder), desktop, bus
 
 
-def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
+ANSWERS = {"condition": "Used - good"}  # what the simulated person says when asked before a run
+
+
+def run_to_end(manager, goal, *, approve=None, answers=ANSWERS, timeout=10, **options):
     manager.start(RunOptions(goal=goal, **options))
     deadline = time.monotonic() + timeout
     while manager.running and time.monotonic() < deadline:
         for approval in list(manager._approvals.values()):
-            manager.approve(approval.info["request_id"], bool(approve))
+            if approval.info["category"] == "questions":
+                manager.approve(approval.info["request_id"], answers is not None, answers=answers or {})
+            else:
+                manager.approve(approval.info["request_id"], bool(approve))
         time.sleep(0.01)
     assert not manager.running, "run did not finish"
     return manager.history[0]
@@ -73,6 +79,7 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
                 and d.apps["Safari"].listing.get("Title") == "Plastic welding gun"
                 and d.apps["Safari"].listing.get("Price") == "40"
                 and d.apps["Safari"].listing.get("Category") == "Tools"  # decided by the (simulated) model
+                and d.apps["Safari"].listing.get("Condition") == "Used - good"  # asked before starting
                 and len(d.apps["Safari"].listing.get("Description", "")) > 40
                 and not d.apps["Safari"].published
             ),
@@ -93,7 +100,7 @@ def test_demo_scenarios_complete(goal, check):
         run = run_to_end(manager, goal)
         assert run["status"] == "done", run
         assert check(desktop)
-        assert all(e["status"] in ("acted", "done", "plan") for e in run["events"])
+        assert all(e["status"] in ("acted", "done", "plan", "ask") for e in run["events"])
     finally:
         manager.close()
 

@@ -60,8 +60,11 @@ log = logging.getLogger("jevosx")
 T = TypeVar("T")
 
 ConfirmFn = Callable[[Action, str], bool]
-# ASK_USER: tell the human what only they can do (e.g. "type a verification code (Safari)"); True = done, continue.
-HandoffFn = Callable[[str, Observation], bool]
+# ASK_USER: tell the human what only they can do (e.g. "type a verification code (Safari)"). True = done on screen,
+# continue; False = stop the run; a string = their typed answer, which becomes text the agent can type.
+HandoffFn = Callable[[str, Observation], "bool | str"]
+# Before starting: the questions the goal reader found (name, question) → the person's answers by name, or None to stop.
+ClarifyFn = Callable[[list[tuple[str, str]]], "dict[str, str] | None"]
 Verifier = Callable[[Observation], bool]
 # Returns "retry" (re-observe, nothing executed), "execute" (explicitly approve this decision) or "stop".
 LowConfidenceHandler = Callable[[LowConfidenceError, Observation], str]
@@ -169,6 +172,7 @@ class Agent:
         logins: LoginStore | None = None,
         confirm: ConfirmFn | None = None,
         handoff: HandoffFn | None = None,
+        clarify: ClarifyFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.perf_counter,
@@ -185,6 +189,7 @@ class Agent:
         self.logins = logins
         self.confirm = confirm
         self.handoff = handoff
+        self.clarify = clarify
         self.gate = ConfidenceGate(self.settings.agent.min_confidence)
         self.on_low_confidence = on_low_confidence
         self.sleep = sleep
@@ -204,6 +209,7 @@ class Agent:
         use_memory: bool = True,
         confirm: ConfirmFn | None = None,
         handoff: HandoffFn | None = None,
+        clarify: ClarifyFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
         notify: Callable[[str], None] | None = None,
     ) -> Agent:
@@ -240,6 +246,7 @@ class Agent:
             logins=logins,
             confirm=confirm,
             handoff=handoff,
+            clarify=clarify,
             on_low_confidence=on_low_confidence,
         )
 
@@ -304,6 +311,15 @@ class Agent:
         try:
             if reading.steps or reading.values:
                 yield emit(StepEvent(step=0, status="plan", action="PLAN", message=reading.summary()))
+            if reading.questions and self.clarify is not None and cfg.ask_first:
+                asked = " · ".join(question for _, question in reading.questions)
+                yield emit(StepEvent(step=0, status="ask", action="ASK", message=asked))
+                answers = self.clarify(reading.questions)
+                if answers is None:
+                    status, message = "aborted", "stopped before starting"
+                    return
+                given = [text_source.add(name, value.strip()) for name, value in answers.items() if value.strip()]
+                history.append({"step": 0, "action": "ASK (before starting)", "result": f"answered: {given or 'none'}"})
             if app:
                 before = self._front() if behind else None
                 result = self._open_requested_app(app)
@@ -451,11 +467,16 @@ class Agent:
                     yield emit(event)
                     if behind and self.work is not None:
                         cast(WindowFocuser, self.executor).bring_forward(self.work)  # the person acts in it
-                    if not self.handoff(f"{need} ({where})", obs):
+                    outcome = self.handoff(f"{need} ({where})", obs)
+                    if outcome is False:
                         entry["result"] = "the user stopped the run"
                         status, message = "aborted", "stopped by you during a hand-off"
                         break
-                    entry["result"] = "the user finished; check the screen"
+                    if isinstance(outcome, str) and outcome.strip():
+                        slot = text_source.add("answer", outcome.strip())
+                        entry["result"] = f"the user answered; their answer is text slot {slot}"
+                    else:
+                        entry["result"] = "the user finished; check the screen"
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
                     continue
 

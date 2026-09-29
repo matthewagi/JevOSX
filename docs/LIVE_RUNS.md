@@ -44,3 +44,25 @@ One line per live run on the Mac: time · task · status · steps · seconds · 
 - 2026-09-29 17:28 · go to facebook marketplace and search for mitre saw, then collect listings (fresh Chrome window, after the read-back fix) · done · 4 · 17.9 · shortest path: facebook.com once, "Marketplace" (0.98), "Search Marketplace" (0.96, typed on the first try), Return, DONE 0.97. The replaced-combobox case did not come up, so the new read-back was not exercised live. Collection: 5 scrolls in 31 s, 45 cards, 45 photos, stopped after 2 scrolls with nothing new. All scrolls PAGE_DOWN. Nothing wrong from JevOSX.
 - 2026-09-29 17:30 · go to facebook marketplace and search for socket set, then collect listings (fresh Chrome window) · done · 4 · 25.3 · shortest path: facebook.com once, "Marketplace" (0.99), "Search Marketplace" (0.98, first try), Return (0.50, the least sure step), DONE 0.96. Collection: 6 scrolls in 34 s, 62 cards, 62 photos, stopped after 2 scrolls with nothing new. All scrolls PAGE_DOWN. Nothing wrong from JevOSX. 4 of 4 searches reached the results page; 1 lost step in 17 (the combobox read-back, now fixed).
 - Marketplace Tool Prices page (317 listings, 5 tools, photos beside it; not published: no Artifact tool in this session, and listing details stay off the public repo): ~/Desktop/marketplace-tools/index.html
+
+## Full-scroll price summary (29 Sep, 317 listings)
+
+From the 17:23–17:30 collection runs. Counted only listings that are the tool searched for (or a kit that includes it); dropped off-topic matches (nail drills, coffee and meat grinders, table and hand saws, discs, lamps, electronics), corded tools under "cordless drill", and one duplicate. Ask = listed at Free or €1, left out of the prices. Prices in €; quartiles inclusive.
+
+| Tool | On-topic | Ask | Priced | Min | P25 | Median | P75 | Max | "new" in title |
+|---|---|---|---|---|---|---|---|---|---|
+| Cordless drill | 41 | 3 | 38 | 10 | 41 | 53 | 118 | 600 | 9 |
+| Angle grinder | 36 | 2 | 34 | 3 | 41 | 73 | 110 | 248 | 4 |
+| Welding machine | 25 | 2 | 23 | 20 | 115 | 130 | 350 | 1,400 | 7 |
+| Mitre saw | 10 | 0 | 10 | 130 | 205 | 275 | 418 | 795 | 0 |
+| Socket set | 29 | 16 | 13 | 5 | 25 | 43 | 60 | 100 | 2 |
+
+Out of 317: 159 were off-topic or accessories. Socket sets are mostly €1 asks, most of them from one seller. Only 10 of 45 "mitre saw" results were mitre saws.
+
+Best value (well below the median for a complete, branded or new item):
+
+- Cordless drill: Bavaria 18V drill set, battery and charger, new — €30, Mosta; Andowl 21V drill with tool set, 2 batteries — €45, Zabbar; Milwaukee drill — €48, St Paul's Bay.
+- Angle grinder: Einhell 750W 115 mm — €40, Gzira; Efftool AG700 115 mm — €40, Żebbuġ; cordless mini grinder, 2 batteries and discs — €40, Qormi.
+- Welding machine: 300 A MMA inverter, new and boxed — €115, Rabat; 300 MMA inverter, new — €115, Santa Luċija; welding set, like new — €80, Sliema.
+- Mitre saw: sliding compound mitre saw — €150, Żebbuġ; Efftool mitre saw — €200, Żebbuġ; Makita LS1011 10" slide compound — €250, Għargħur.
+- Socket set: socket set, new and boxed (was €125) — €25, Rabat; 19-piece bit socket set — €25, Żabbar; 108-piece professional socket set, new — €55, Santa Luċija (just over the median, but the most complete).

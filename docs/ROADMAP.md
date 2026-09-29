@@ -233,6 +233,9 @@ to save and how many before starting.
   to the right" and "left" buttons in turn until out of steps. A page a picture was saved from is now a source like
   the results page: the next picture is saved without asking, and when all visible ones are saved the page is
   scrolled down (up to 4 times in a row) before Jev decides again.
+- Seen live (third run): done after 2 of 3, because Jev said DONE (0.36) and only saves were checked against the
+  count; and on Google's picture results no picture was offered, because the results are buttons and only link
+  cards were opened. DONE is now refused until enough are saved, and big web buttons are opened like links.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

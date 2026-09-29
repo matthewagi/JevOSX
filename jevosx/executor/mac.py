@@ -191,6 +191,9 @@ class MacExecutor:
 
     def _click(self, element: UIElement, obs: Observation) -> ActionResult:
         node = element.node
+        if element.kind == "image":  # a web picture lists only AXShowMenu, yet Chrome clicks it on AXPress
+            node.perform("AXPress")
+            return ActionResult(True, "AXPress")
         actions = element.actions or node.actions()
         for name in PRESS_ACTIONS:
             if name in actions:

@@ -236,6 +236,15 @@ to save and how many before starting.
 - Seen live (third run): done after 2 of 3, because Jev said DONE (0.36) and only saves were checked against the
   count; and on Google's picture results no picture was offered, because the results are buttons and only link
   cards were opened. DONE is now refused until enough are saved, and big web buttons are opened like links.
+- Seen live (fourth run): done in 4 steps, but all three files were Google's thumbnails (500 to 680 pixels, 30 to
+  45 KB, from encrypted-tbn0.gstatic.com). SAVE_IMAGE now presses the tile (AXPress, although the image lists only
+  AXShowMenu), reads the original from the preview beside the results or from the tile's /imgres?imgurl= link, and
+  saves that; when the site refuses, Google's copy is saved and the step says so. Next run: 2560×1707 (534 KB),
+  800×1000, 652×515, still 4 steps.
+- Seen live (fifth run, from a fresh window): 6 steps. Reads taken while the results loaded, and again while Chrome
+  rebuilt them after a tile was pressed, had only the page's header (40 elements instead of about 108), and Jev
+  clicked "Search" and "Search by image". A source page with no unsaved picture and nothing to scroll is now read
+  again (up to 10 times) instead of being judged.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

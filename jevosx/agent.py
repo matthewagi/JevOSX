@@ -41,6 +41,8 @@ from .images import (
     file_stem,
     image_plan,
     image_task,
+    is_thumbnail,
+    original_of,
     page_key,
     search_address,
 )
@@ -57,6 +59,7 @@ from .router.text import ADDRESS, TextSource, slot_kind, slots_from_goal, templa
 from .types import (
     ASK_USER,
     BLOCKED,
+    CLICK,
     DONE,
     FOCUS_WINDOW,
     MENU,
@@ -69,6 +72,7 @@ from .types import (
     Action,
     ActionResult,
     Observation,
+    UIElement,
     clean_text,
     is_console_window,
 )
@@ -78,6 +82,10 @@ log = logging.getLogger("jevosx")
 T = TypeVar("T")
 MAX_IMAGE_FAILURES = 3
 MAX_PICTURE_SCROLLS = 4  # scrolls in a row for more pictures before Jev decides again
+ORIGINAL_READS = 8  # reads of the page after pressing a thumbnail, waiting for the full picture beside it
+ORIGINAL_WAIT_S = 0.3
+RESULTS_READS = 10  # reads while the picture results load, before Jev decides on whatever is there
+RESULTS_WAIT_S = 0.3
 # Questions an image-saving goal never needs answered first: the folder and the number of pictures have defaults.
 IMAGE_DEFAULTS = re.compile(
     r"\b(?:folder|directory|where|location|destination|save|path|how many|count|number|quantity)\b", re.IGNORECASE
@@ -226,6 +234,7 @@ class Agent:
         self._sensitive: list[str] = []  # saved-login usernames on screen: masked in events, memory and logs
         self.last_plan: list[str] = []
         self.work: WindowRef | None = None  # the agent's own work window (agent.background)
+        self._behind = False  # this run reads its work window behind others (see works_behind)
 
     @classmethod
     def from_settings(
@@ -343,7 +352,7 @@ class Agent:
             return event
 
         self.work = None
-        behind = self.works_behind
+        behind = self._behind = self.works_behind
         try:
             if reading.steps or reading.values:
                 yield emit(StepEvent(step=0, status="plan", action="PLAN", message=reading.summary()))
@@ -400,6 +409,11 @@ class Agent:
                         status, message = "blocked", f"{no_change} consecutive actions produced no visible change"
                         break
 
+                if images is not None and images.loading > 0 and not pictures_ready(obs, images):
+                    images.loading -= 1  # Jev would only see a blank or half-built page
+                    self.sleep(RESULTS_WAIT_S)
+                    continue
+
                 if self.logins is not None:
                     text_source.set_credentials(credential_slots(self.logins, obs, goal))
                     self._sensitive = text_source.sensitive_values()
@@ -423,6 +437,8 @@ class Agent:
                     plan=plan,
                 )
                 t3 = self.clock()
+                if images is not None and decision.operation == TYPE_TEXT and decision.text_option == "picture_search":
+                    images.loading, images.loading_results = RESULTS_READS, True
                 event = StepEvent(
                     step=steps + 1,
                     status="decided",
@@ -848,15 +864,45 @@ class Agent:
         task.saved_urls.add(url)  # tried: never offered again, whether it saves or not
         if isinstance(self.executor, DryRunExecutor):
             return True, f"dry run: would save it into {display_path(task.folder)}"
-        try:
-            path = self.image_saver.save(url, task.folder, file_stem(task, url), referer=obs.page_url)
-        except ImageSaveError as exc:
-            return False, f"failed: {exc}"
+        original = self._original(element, obs, task) if element is not None and is_thumbnail(url) else None
+        failure: ImageSaveError | None = None
+        for source in (original, url) if original else (url,):  # a site that refuses: Google's copy is still good
+            try:
+                path = self.image_saver.save(source, task.folder, file_stem(task, source), referer=obs.page_url)
+                break
+            except ImageSaveError as exc:
+                failure = exc
+        else:
+            return False, f"failed: {failure}"
+        if original:
+            task.saved_urls.add(original)
         task.saved.append(path)
         if obs.page_url:
             task.pages.add(page_key(obs.page_url))
         task.scrolls = 0
-        return True, f"saved {path.name} ({task.progress()})"
+        task.loading, task.loading_results = RESULTS_READS, False  # pressing the tile makes Chrome rebuild the page
+        small = " · Google's small copy" if is_thumbnail(source) else ""
+        return True, f"saved {path.name}{small} ({task.progress()})"
+
+    def _original(self, thumbnail: UIElement, obs: Observation, task: ImageTask) -> str | None:
+        """The full picture behind a Google thumbnail: press the tile and read it from the preview that opens.
+        Seen live: every picture saved from Google's results was its 500-pixel thumbnail."""
+        found = original_of(thumbnail, obs.elements, task.saved_urls)
+        try:
+            if not found and self.executor.execute(Action(CLICK, element=thumbnail), obs).ok:
+                for _ in range(ORIGINAL_READS):
+                    self.sleep(ORIGINAL_WAIT_S)
+                    obs = self._observe(self._behind)
+                    found = original_of(thumbnail, obs.elements, task.saved_urls)
+                    if found:
+                        break
+        except JevOSXError as exc:
+            log.info("no full picture for %s: %s", thumbnail.describe(), exc)
+        if found:  # the preview shows the same picture: never offer it again
+            task.saved_urls.update(
+                e.url for e in obs.elements if e.kind == "image" and e.label == thumbnail.label and e.url
+            )
+        return found
 
     def _open_requested_app(self, query: str) -> ActionResult:
         target = self.observer.find_app(query)
@@ -940,6 +986,18 @@ class Agent:
 
 
 CONSOLE_NAVIGATION = frozenset({PRESS_KEY, MENU, OPEN_APP, FOCUS_WINDOW})
+
+
+def pictures_ready(obs: Observation, images: ImageTask) -> bool:
+    """Whether the page can be judged yet. Seen live: while the results loaded, and again while Chrome rebuilt
+    them after a tile was pressed, a read had only the page's header (40 elements, no pictures, nothing to scroll),
+    and Jev clicked "Search" and "Search by image"."""
+    if images.loading_results and not images.is_source(obs.page_url):
+        return False
+    if not images.is_source(obs.page_url):
+        return True
+    pictures = any(SAVE_IMAGE in e.ops and e.url not in images.saved_urls for e in obs.elements)
+    return pictures or any(area.in_web_area for area in obs.scroll_areas)
 
 
 def next_picture(space: ActionSpace, obs: Observation, images: ImageTask | None) -> Decision | None:

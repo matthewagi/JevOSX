@@ -20,13 +20,18 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote_plus, unquote, urlsplit
 
 import httpx
 
 from .errors import JevOSXError
+
+if TYPE_CHECKING:
+    from .types import UIElement
 
 MIN_SIDE = 60  # points: smaller pictures are icons, avatars and logos
 MAX_BYTES = 25 * 1024 * 1024
@@ -98,6 +103,8 @@ class ImageTask:
     saved_urls: set[str] = field(default_factory=set)
     pages: set[str] = field(default_factory=set)  # pages a picture was saved from: sources for the rest
     scrolls: int = 0  # scrolled for more pictures since the last one was saved
+    loading: int = 0  # reads left to wait for a page of pictures that is still loading or being rebuilt
+    loading_results: bool = False  # the picture results' address was typed: wait until they are in front
 
     def is_source(self, page_url: str | None) -> bool:
         """A page to keep saving from: the picture results for the topic, or a page Jev already saved from."""
@@ -232,6 +239,45 @@ def is_results_page(url: str | None, topic: str) -> bool:
 def page_key(url: str | None) -> str:
     """A page without its fragment: scrolling or a gallery overlay must not make it another page."""
     return (url or "").split("#", 1)[0]
+
+
+def is_thumbnail(url: str | None) -> bool:
+    """Google's small copy of a picture on its results (encrypted-tbn0.gstatic.com, about 500 pixels wide)."""
+    return bool(re.fullmatch(r"encrypted-tbn\d*\.gstatic\.com", urlsplit(url or "").netloc.lower()))
+
+
+def imgres_target(url: str | None) -> str | None:
+    """The picture a Google /imgres link points at (its imgurl), or None for any other link."""
+    parts = urlsplit(url or "")
+    if not (parts.netloc.lower().startswith(("www.google.", "google.")) and parts.path == "/imgres"):
+        return None
+    return next(iter(parse_qs(parts.query).get("imgurl", [])), None)
+
+
+def original_of(thumbnail: UIElement, elements: Iterable[UIElement], skip: Iterable[str] = ()) -> str | None:
+    """The full-size picture behind one of Google's thumbnails. Once its tile is pressed, the tile's link becomes
+    /imgres?imgurl=<original> and the preview beside the results shows the original, both with the tile's label."""
+    label = thumbnail.label
+    if not label or label == "image":
+        return None
+    skipped = set(skip) | {thumbnail.url}
+    linked: list[str] = []
+    shown: list[tuple[float, str]] = []
+    for element in elements:
+        if element.label != label or not element.url:
+            continue
+        if element.role == "AXLink":
+            target = imgres_target(element.url)
+            if target:
+                linked.append(target)
+        elif element.kind == "image":
+            area = element.frame.w * element.frame.h if element.frame is not None else 0.0
+            shown.append((area, element.url))
+    candidates = linked + [url for _, url in sorted(shown, reverse=True)]
+    return next(
+        (u for u in candidates if u not in skipped and not is_thumbnail(u) and urlsplit(u).scheme in ("http", "https")),
+        None,
+    )
 
 
 def savable_url(url: str | None) -> bool:

@@ -375,3 +375,171 @@ def test_pictures_inside_web_buttons_are_offered():
     root = FakeNode("AXWindow", Title="golden retrievers - Google Search", frame=(0, 0, 800, 600), children=[web])
     result = TreeWalker().walk([(root, None)])
     assert [e.kind for e in result.elements] == ["control", "image"]
+
+
+# ---- full-size pictures behind Google's thumbnails -----------------------------------------------------------------
+THUMB = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9Gc{}&s=10"
+
+
+class GoogleResults(FakeDesktop):
+    """Google's picture results: thumbnails in a grid; pressing one shows its original in a preview beside them."""
+
+    def __init__(self):
+        super().__init__({}, "results", {})
+        self.open: int | None = None
+        self.half_built = 0  # reads that have only the page's header, as while Chrome rebuilds the results
+
+    def observe(self):
+        if self.half_built > 0:
+            self.half_built -= 1
+            obs = observation([element(1, "AXButton", "Search", in_web_area=True)], app=CHROME, window="Google")
+            obs.page_url = "https://www.google.com/search?q=golden+retrievers&udm=2"
+            return obs
+        tiles = [picture(i + 3, f"Golden retriever {i}", THUMB.format(i)) for i in range(6)]
+        extra = []
+        if self.open is not None:
+            label = f"Golden retriever {self.open}"
+            extra = [
+                element(20, "AXLink", label, in_web_area=True,
+                        url=f"https://www.google.com/imgres?q=dogs&imgurl=https%3A%2F%2Fsite.example%2F{self.open}.jpg"),
+                picture(21, label, f"https://site.example/{self.open}.jpg?w=1200"),
+            ]  # fmt: skip
+        obs = observation([*tiles, *extra], app=CHROME, window="golden retrievers - Google Search")
+        obs.page_url = "https://www.google.com/search?q=golden+retrievers&udm=2"
+        return obs
+
+    def execute(self, action, obs):
+        result = super().execute(action, obs)
+        if action.operation == "CLICK" and action.element is not None and action.element.kind == "image":
+            self.open = action.element.index - 3
+        return result
+
+
+def google_agent(desktop, serve):
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    return Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(jev), keys=key_vocabulary()),
+        settings=settings,
+        image_saver=ImageSaver(client(serve)),
+        sleep=lambda _s: None,
+    )
+
+
+def test_saves_the_full_picture_behind_a_google_thumbnail(tmp_path, monkeypatch):
+    """Seen live: all three "photos" saved from Google's results were its 500-pixel thumbnails (30 to 45 KB)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    def serve(request):
+        downloads.append(str(request.url))
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    desktop = GoogleResults()
+    agent = google_agent(desktop, serve)
+    result = agent.run(GOAL, max_steps=6)
+    assert result.status == "done" and result.steps == 3  # still one step per picture
+    assert downloads == [f"https://site.example/{i}.jpg" for i in range(3)]  # the imgres original, not the preview
+    assert [e.split(" [")[0] for e in desktop.executed] == ["CLICK"] * 3
+
+
+def test_a_preview_of_a_saved_picture_is_not_saved_again(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    desktop = GoogleResults()
+    agent = google_agent(desktop, lambda r: httpx.Response(200, content=PNG))
+    assert agent.run("save 1 photo of golden retrievers on my desktop").status == "done"
+    from jevosx.images import ImageTask
+
+    task = ImageTask(folder=tmp_path, count=1)
+    agent._original(desktop.observe().elements[0], desktop.observe(), task)
+    assert "https://site.example/0.jpg?w=1200" in task.saved_urls
+
+
+def test_falls_back_to_the_thumbnail_when_the_site_refuses(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    def serve(request):
+        downloads.append(request.url.host)
+        if request.url.host == "site.example":
+            return httpx.Response(403)
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    agent = google_agent(GoogleResults(), serve)
+    result = agent.run(GOAL, max_steps=6)
+    assert result.status == "done" and len(list((tmp_path / "Desktop" / "dogs").iterdir())) == 3
+    assert downloads == ["site.example", "encrypted-tbn0.gstatic.com"] * 3
+    assert all("small copy" in e.message for e in result.events if e.action.startswith("SAVE_IMAGE"))
+
+
+def test_original_of_reads_the_preview_and_the_imgres_link():
+    from jevosx.images import imgres_target, is_thumbnail, original_of
+
+    tile = picture(3, "Dog on grass", THUMB.format("a"))
+    preview = picture(30, "Dog on grass", "https://site.example/big.jpg")
+    other = picture(31, "Cat", "https://site.example/cat.jpg")
+    assert original_of(tile, [tile, other]) is None  # not pressed yet
+    assert original_of(tile, [tile, preview, other]) == "https://site.example/big.jpg"
+    assert original_of(tile, [tile, preview], skip={"https://site.example/big.jpg"}) is None
+    assert is_thumbnail(THUMB.format("a")) and not is_thumbnail("https://site.example/big.jpg")
+    assert (
+        imgres_target("https://www.google.com/imgres?imgurl=https%3A%2F%2Fa.example%2F1.jpg")
+        == "https://a.example/1.jpg"
+    )
+    assert imgres_target("https://example.com/imgres?imgurl=x") is None
+
+
+def test_waits_for_the_picture_results_to_load_without_asking_jev(tmp_path, monkeypatch):
+    """Seen live: read while the results were loading, the page was blank and Jev suggested Reload (withheld)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    base = screens()
+    reads = []
+
+    def loading():
+        reads.append("loading")
+        if len(reads) > 2:
+            desktop.screen = "results"
+        return base["blank"]()
+
+    def results():
+        obs = base["results"]()
+        obs.page_url = "https://www.google.com/search?q=golden+retrievers&udm=2"
+        return obs
+
+    asked = []
+    desktop = FakeDesktop(
+        {"blank": base["blank"], "loading": loading, "results": results}, "blank", {("blank", "google.com"): "loading"}
+    )
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(lambda body: asked.append(body) or jev(body)), keys=key_vocabulary()),
+        settings=settings,
+        image_saver=ImageSaver(client(lambda r: httpx.Response(200, content=PNG))),
+        sleep=lambda _s: None,
+    )
+    result = agent.run(GOAL, max_steps=6)
+    assert result.status == "done" and result.steps == 4 and len(asked) == 1 and len(reads) == 3
+
+
+def test_waits_for_the_results_to_be_rebuilt_after_a_save(tmp_path, monkeypatch):
+    """Seen live: after a tile was pressed, a read had only the header and Jev clicked "Search by image"."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    desktop = GoogleResults()
+    asked = []
+
+    def serve(request):
+        desktop.half_built = 2
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    agent = google_agent(desktop, serve)
+    agent.router = JevRouter(
+        scripted_client(lambda body: asked.append(body) or {"operation": "CLICK"}), keys=key_vocabulary()
+    )
+    result = agent.run(GOAL, max_steps=6)
+    assert result.status == "done" and result.steps == 3 and asked == []
+    assert desktop.executed == [e for e in desktop.executed if e.startswith("CLICK [") and "image" in e]

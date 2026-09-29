@@ -342,6 +342,22 @@ to save and how many before starting.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 
+## Phase 11: collecting a whole results page (done, not yet seen live)
+
+Asked for: keep scrolling to the end, then scrape. Seen live: collecting Marketplace results by asking Jev to "scroll
+down the results" cost one model decision per scroll (5–30 s); "stop after 2 empty scrolls" quit before a late batch
+of 24 cards; a cap of 80 cut drills and grinders short; and far down, results stop matching (176 of 317 off-topic).
+
+- **`jevosx collect`** (`jevosx/collect.py`): reads the page, keeps every result card not seen yet, scrolls one page
+  (the page's scroll area, else Page Down) and reads again. No model, no clicks, no typing.
+- **Results found on their own**: the link address shape most photo-sized cards share (`/marketplace/item/{n}`),
+  or `--match`. Keyed by address without tracking parameters, so a card seen twice counts once. Its picture is the
+  largest image inside the card; its price is read from the card text.
+- **Patient stop rules**: waits longer after a scroll that brought nothing; stops after `--patience` (5) empty
+  scrolls, when the page cannot scroll further, at `--max` (500), or, with `--query`, when fewer than a quarter of the
+  latest 20 results mention the query.
+- `--out results.json`, `--photos folder/` (downloads each picture), and a price summary (ask prices left out).
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

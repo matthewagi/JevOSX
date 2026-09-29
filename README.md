@@ -17,6 +17,8 @@ It can also:
 - sign in to websites with logins kept in the macOS Keychain;
 - save pictures from the web into a folder in one step each, for example "find 3 photos of golden retrievers and save
   them in a folder called dogs on my desktop";
+- collect every result of a long, endlessly scrolling page (`jevosx collect --query "cordless drill" --out
+  drills.json --photos drills/`), with no model calls;
 - hand a step to you (a 2FA code, a CAPTCHA) and carry on afterwards.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the research behind these and what comes next.

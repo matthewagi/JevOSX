@@ -1,4 +1,4 @@
-"""Command-line interface: `jevosx run | observe | ui | write | login | diagnose | doctor | report | memory`."""
+"""Command-line interface: `jevosx run | observe | collect | ui | write | login | diagnose | doctor | report`."""
 
 from __future__ import annotations
 
@@ -77,6 +77,17 @@ def build_parser() -> argparse.ArgumentParser:
     observe.add_argument("--json", action="store_true", help="print the exact Jev state and questions instead")
     observe.add_argument("--goal", default="(inspect only)", help="goal to embed in --json questions")
     observe.set_defaults(handler=cmd_observe)
+
+    collect = sub.add_parser("collect", help="scroll a results page to its end and save every result (no model)")
+    collect.add_argument("--app", help='bring this app to the front first, e.g. --app "Google Chrome"')
+    collect.add_argument("--match", help="regular expression a result's link must match (default: found on its own)")
+    collect.add_argument("--query", help="stop once most of the latest results no longer mention these words")
+    collect.add_argument("--max", type=int, default=500, help="keep at most this many results (default 500)")
+    collect.add_argument("--patience", type=int, default=5, help="stop after this many empty scrolls (default 5)")
+    collect.add_argument("--out", type=Path, help="write the results as JSON to this file")
+    collect.add_argument("--photos", type=Path, help="save each result's picture into this folder")
+    collect.add_argument("--delay", type=float, default=0.0, help="seconds to wait first (switch to the page)")
+    collect.set_defaults(handler=cmd_collect)
 
     ui = sub.add_parser("ui", help="open the local web console: type commands, watch and approve steps")
     ui.add_argument("--demo", action="store_true", help="simulated Mac + simulated decisions (any OS, no API key)")
@@ -304,6 +315,53 @@ def cmd_observe(args: argparse.Namespace, settings: Settings) -> int:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     print(f"// state {state_size(state)} bytes · {len(questions)} choice questions", file=sys.stderr)
     return 0
+
+
+# ---- collect -------------------------------------------------------------------------------------------------------
+def cmd_collect(args: argparse.Namespace, settings: Settings) -> int:
+    from .collect import Collector, price_summary, save_photos
+    from .executor import create_executor
+    from .executor.keys import key_vocabulary
+    from .observer import create_observer
+    from .observer.ax import require_trusted
+
+    observer = create_observer(settings.observer)
+    require_trusted()
+    executor = create_executor(settings.executor, observer.frontmost_pid)
+    if args.app:
+        app = observer.find_app(args.app)
+        if app is None:
+            raise JevOSXError(f"no running or installed app matches {args.app!r}")
+        executor.open_app(app)
+        time.sleep(0.5)
+    if args.delay:
+        time.sleep(args.delay)
+    collector = Collector(
+        observer,
+        executor,
+        page_down=key_vocabulary()["PAGE_DOWN"],
+        match=args.match,
+        query=args.query,
+        max_items=args.max,
+        patience=args.patience,
+        progress=lambda message: print(message, file=sys.stderr),
+    )
+    result = collector.run()
+    if args.photos:
+        saved = save_photos(result.items, args.photos.expanduser())
+        print(f"{saved} pictures saved in {args.photos}", file=sys.stderr)
+    summary = price_summary(result.items)
+    print(
+        f"{len(result.items)} results in {result.elapsed_s:.0f} s ({result.scrolls} scrolls): {result.stop_reason}"
+        + (f" · prices €{summary['min']:g}–€{summary['max']:g}, median €{summary['median']:g}" if summary else "")
+    )
+    payload = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+    if args.out:
+        args.out.expanduser().write_text(payload + "\n", encoding="utf-8")
+        print(f"written to {args.out}")
+    elif not args.photos:
+        print(payload)
+    return 0 if result.items else 1
 
 
 # ---- ui ----------------------------------------------------------------------------------------------------------

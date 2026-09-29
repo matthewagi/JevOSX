@@ -70,6 +70,7 @@ confirm_credentials = true         # ask before typing a saved password
 max_steps = 40
 min_confidence = 0.65              # confidence gate: below this, nothing is executed blindly
 low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
+console_low_confidence_policy = "ask"  # the web console's default: you approve unsure steps instead of re-asking
 max_low_confidence_retries = 2
 gate_console_navigation = false    # true: also gate new-window/app-switch moves away from the web console
 fallback_log = "~/.jevosx/fallbacks.jsonl"

@@ -388,6 +388,11 @@ async function refreshStatus() {
     checks.append(h("span", { class: "pill", title: "decision model" }, h("span", { class: "dot" }), s.model));
     if (s.memory.enabled) checks.append(h("span", { class: "pill ok", title: "local trajectory memory" }, h("span", { class: "dot" }),
       `memory · ${s.memory.episodes ?? 0} runs`));
+    if (s.stale && !state.staleShown) {
+      state.staleShown = true;
+      toast("JevOSX was updated after this console started. Stop it with Ctrl+C in Terminal and run jevosx ui again.");
+      logLine("update", "newer JevOSX code is on disk: restart the console to use it", "w");
+    }
     if (!state.initialized) {
       state.initialized = true; state.floor = s.defaults.min_confidence; state.policy = s.defaults.low_confidence_policy;
       $("#opt-floor").value = state.floor; $("#opt-floor-v").textContent = Number(state.floor).toFixed(2); setPolicy(state.policy);
@@ -662,6 +667,7 @@ function init() {
   for (const b of $$("#opt-policy button")) b.onclick = () => setPolicy(b.dataset.v);
   for (const b of $$(".tabs button")) b.onclick = () => showTab(b.dataset.tab);
   refreshStatus().then(() => showTab("screen"));
+  setInterval(refreshStatus, 60000);  // also notices when JevOSX was updated underneath a running console
   connect();
   $("#goal").focus();
 }

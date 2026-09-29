@@ -237,3 +237,18 @@ def test_event_stream_delivers_run_events(server):
             kinds.add(line.split(": ", 1)[1].strip())
     conn.close()
     assert {"run_started", "step", "run_finished"} <= kinds
+
+
+def test_status_tells_you_to_restart_after_an_update(monkeypatch):
+    import jevosx.ui.server as server
+
+    versions = iter([100.0, 100.0, 200.0])
+    monkeypatch.setattr(server, "code_version", lambda: next(versions))
+    manager, _, _ = make_manager()
+    try:
+        assert manager.status()["stale"] is False
+        status = manager.status()
+        assert status["stale"] is True and status["checks"][0]["name"] == "Restart to update"
+        assert status["defaults"]["low_confidence_policy"] == "ask"  # someone is watching: ask, don't re-ask Jev
+    finally:
+        manager.close()

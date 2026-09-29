@@ -146,6 +146,8 @@ class AgentSettings:
     # chosen target are at least this floor. Otherwise the fallback policy runs and nothing is executed blindly.
     min_confidence: float = 0.65
     low_confidence_policy: str = "retry"  # retry (re-observe) | ask (human approves) | stop
+    # In the web console someone is watching, so an unsure step is shown for approval instead of re-asked.
+    console_low_confidence_policy: str = "ask"
     max_low_confidence_retries: int = 2
     # From the web console's own window the agent may only open a window/tab or switch apps/windows. Those moves
     # change nothing, so by default they are not held back by the floor (set true to gate them too).
@@ -262,6 +264,7 @@ class Settings:
     def validate(self) -> None:
         choices = {
             "agent.low_confidence_policy": (self.agent.low_confidence_policy, ("retry", "ask", "stop")),
+            "agent.console_low_confidence_policy": (self.agent.console_low_confidence_policy, ("retry", "ask", "stop")),
             "jev.offer_installed_apps": (self.jev.offer_installed_apps, ("mentioned", "all", "none")),
             "executor.typing_mode": (self.executor.typing_mode, ("auto", "ax", "keys")),
             "writer.backend": (self.writer.backend, ("auto", "apple", "openai", "off")),

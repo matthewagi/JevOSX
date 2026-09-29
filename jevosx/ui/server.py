@@ -199,6 +199,19 @@ class _Approval:
     info: dict[str, Any] = field(default_factory=dict)
 
 
+def code_version() -> float:
+    """Newest modification time of the installed JevOSX code (a `git pull` changes it)."""
+    root = Path(__file__).resolve().parents[1]
+    newest = 0.0
+    for pattern in ("*.py", "*.swift", "*.html"):
+        for path in root.rglob(pattern):
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                continue
+    return newest
+
+
 class RunManager:
     """Owns the long-lived components and runs one agent at a time on a worker thread."""
 
@@ -223,6 +236,7 @@ class RunManager:
         self._last_obs: Observation | None = None
         self.current: dict[str, Any] | None = None
         self.history: deque[dict[str, Any]] = deque(maxlen=20)
+        self._started_code = code_version()
 
     # ---- lifecycle ----------------------------------------------------------------------------------------------
     def components(self) -> Components:
@@ -344,6 +358,19 @@ class RunManager:
             # Optional feature: an unavailable writer is shown as neutral (None), not as a failure.
             detail = writer.detail + (f" → {writer.hint}" if writer.hint and not writer.available else "")
             checks.append({"name": "Writer", "ok": True if writer.available else None, "detail": detail})
+        # A running console keeps the code it started with: say so after an update instead of silently
+        # running the old version (this happened on a real Mac after `git pull`).
+        stale = code_version() > self._started_code + 1
+        if stale:
+            checks.insert(
+                0,
+                {
+                    "name": "Restart to update",
+                    "ok": False,
+                    "detail": "JevOSX was updated after this console started. Stop it with Ctrl+C in Terminal and "
+                    "run jevosx ui again.",
+                },
+            )
         memory: dict[str, Any] = {"enabled": self.settings.memory.enabled}
         if self._components is not None and self._components.memory is not None:
             stats = self._components.memory.stats()
@@ -356,10 +383,11 @@ class RunManager:
             "memory": memory,
             "defaults": {
                 "min_confidence": self.settings.agent.min_confidence,
-                "low_confidence_policy": self.settings.agent.low_confidence_policy,
+                "low_confidence_policy": self.settings.agent.console_low_confidence_policy,
                 "max_steps": self.settings.agent.max_steps,
             },
             "running": self.running,
+            "stale": stale,
         }
 
     def memory(self, limit: int = 30) -> dict[str, Any]:

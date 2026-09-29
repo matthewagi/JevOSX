@@ -52,6 +52,9 @@ VALUES: every piece of text the assistant will have to type, one per line, each 
   the value, on one line, for example description: ...
 - when the request is to sell or list an item, also the everyday category it belongs in, even if the request does
   not name it, for example category: Tools
+- when the request is to save pictures or files, the folder as a path under ~, for example folder: ~/Desktop/dogs
+  (a folder the request does not name goes in ~/Pictures, named after what the pictures show), and how many as
+  count: 5 (5 when the request does not say)
 Never include passwords or codes. Never invent personal details (names, emails, phone numbers, addresses) or facts
 only the person knows (an item's condition, age or size) that are not in the request. If nothing needs typing,
 write: VALUES: none
@@ -59,7 +62,8 @@ ASK: before starting, what the task cannot be finished without that the request 
 can know or provide: files to upload (for example photos of an item to sell), an item's condition, which account,
 a recipient. At most 3, one short question per line, each with a short lowercase name, for example
 photos: Where are the photos of the item saved?
-Not what you can decide yourself (a category, wording, a title), not preferences, never passwords. If nothing is
+Not what you can decide yourself (a category, wording, a title, a folder, a file name, how many), not
+preferences, never passwords. If nothing is
 missing, write: ASK: none"""
 
 _MULTI_PART = re.compile(r",|;|\bthen\b|\band\b|\bafter(?:wards)?\b|\bnext\b|\bfinally\b", re.IGNORECASE)

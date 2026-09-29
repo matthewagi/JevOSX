@@ -348,13 +348,15 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const OP_COLOR = { CLICK: "--op-click", TYPE_TEXT: "--op-type", MENU: "--op-menu", PRESS_KEY: "--op-key",
   OPEN_APP: "--op-app", FOCUS_WINDOW: "--op-app", SCROLL_UP: "--op-scroll", SCROLL_DOWN: "--op-scroll",
-  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn", PLAN: "--accent-2", ASK: "--warn" };
+  SAVE_IMAGE: "--op-done", WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn",
+  PLAN: "--accent-2", ASK: "--warn" };
 const STATUS_TEXT = { acted: "executed", wait: "waited", done: "goal complete", blocked: "blocked", denied: "refused by safety",
   declined: "declined", stale: "UI changed, re-observed", low_confidence: "withheld (low confidence)", failed: "failed",
   handoff: "handed to you", plan: "outline from the on-device model", ask: "asked you first" };
 const RUN_TEXT = { running: "Running", success: "Verified", done: "Done", blocked: "Blocked", low_confidence: "Low confidence",
   failed: "Failed", max_steps: "Out of steps", aborted: "Stopped", error: "Error" };
 const EXAMPLES = [
+  ["Save photos", "Find 3 photos of golden retrievers and save them in a folder called dogs on my desktop"],
   ["Write a poem", "Open TextEdit and write a short poem about the sea"],
   ["Log in to a site", "Log in to github.com in Safari"],
   ["App without controls", "Start a new game of Space Blocks on normal difficulty"],

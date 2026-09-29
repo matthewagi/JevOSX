@@ -145,7 +145,7 @@ class UIElement:
     subrole: str | None
     label: str
     value: str | None = None
-    kind: str = "control"  # control | text_input | row | menu_item | scroll_area
+    kind: str = "control"  # control | text_input | row | menu_item | scroll_area | image
     ops: tuple[str, ...] = ()
     enabled: bool = True
     focused: bool = False
@@ -159,7 +159,7 @@ class UIElement:
     shortcut: str | None = None
     in_web_area: bool = False
     value_settable: bool = False
-    url: str | None = None  # links: where they lead (scheme, host and path are shown to Jev)
+    url: str | None = None  # links and pictures: where they lead (scheme, host and path are shown to Jev)
     frame: Rect | None = field(default=None, repr=False)
     actions: tuple[str, ...] = field(default=(), repr=False)
     node: Any = field(default=None, repr=False, compare=False)
@@ -253,6 +253,7 @@ SCROLL_UP = "SCROLL_UP"
 SCROLL_DOWN = "SCROLL_DOWN"
 OPEN_APP = "OPEN_APP"
 FOCUS_WINDOW = "FOCUS_WINDOW"
+SAVE_IMAGE = "SAVE_IMAGE"  # download a picture on a web page into the run's folder (see images.py)
 ASK_USER = "ASK_USER"  # hand control to the human (2FA code, CAPTCHA, passkey…), then continue
 WAIT = "WAIT"
 DONE = "DONE"

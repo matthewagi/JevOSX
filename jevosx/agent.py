@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import asdict, dataclass, field
@@ -30,6 +31,17 @@ from .errors import (
 )
 from .executor.base import DryRunExecutor, Executor, WindowFocuser
 from .executor.safety import SafetyPolicy, SafetyVerdict
+from .images import (
+    COUNT_NAMES,
+    FOLDER_NAMES,
+    ImageSaveError,
+    ImageSaver,
+    ImageTask,
+    display_path,
+    file_stem,
+    image_task,
+    search_address,
+)
 from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
@@ -37,7 +49,7 @@ from .observer.base import BackgroundObserver, Observer, WindowRef
 from .planner import GoalReading, Planner, merge_slots
 from .risk import CAREFUL, StepRisk, assess, is_sign_in
 from .router.policy import Decision, JevRouter, redact
-from .router.text import TextSource, slots_from_goal, template_slots
+from .router.text import ADDRESS, TextSource, slot_kind, slots_from_goal, template_slots
 from .types import (
     ASK_USER,
     BLOCKED,
@@ -46,6 +58,7 @@ from .types import (
     MENU,
     OPEN_APP,
     PRESS_KEY,
+    SAVE_IMAGE,
     TYPE_TEXT,
     WAIT,
     Action,
@@ -58,6 +71,11 @@ from .writer import TextWriter, create_writer, wants_generation
 
 log = logging.getLogger("jevosx")
 T = TypeVar("T")
+MAX_IMAGE_FAILURES = 3
+# Questions an image-saving goal never needs answered first: the folder and the number of pictures have defaults.
+IMAGE_DEFAULTS = re.compile(
+    r"\b(?:folder|directory|where|location|destination|save|path|how many|count|number|quantity)\b", re.IGNORECASE
+)
 
 ConfirmFn = Callable[[Action, str], bool]
 # ASK_USER: tell the human what only they can do (e.g. "type a verification code (Safari)"). True = done on screen,
@@ -174,6 +192,7 @@ class Agent:
         handoff: HandoffFn | None = None,
         clarify: ClarifyFn | None = None,
         on_low_confidence: LowConfidenceHandler | None = None,
+        image_saver: ImageSaver | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.perf_counter,
     ):
@@ -192,6 +211,8 @@ class Agent:
         self.clarify = clarify
         self.gate = ConfidenceGate(self.settings.agent.min_confidence)
         self.on_low_confidence = on_low_confidence
+        self.image_saver = image_saver or ImageSaver()
+        self.images: ImageTask | None = None  # this run's pictures to save (folder, how many, saved so far)
         self.sleep = sleep
         self.clock = clock
         self.last_result: RunResult | None = None
@@ -276,6 +297,14 @@ class Agent:
         plan = reading.steps
         self.last_plan = plan
         slots = merge_slots(reading.values, slots_from_goal(goal))
+        images = self.images = image_task(goal, reading.values)
+        if images is not None:
+            # Folder and count have defaults: never a reason to stop and ask before starting.
+            reading.questions = [(n, q) for n, q in reading.questions if not IMAGE_DEFAULTS.search(f"{n} {q}")]
+            for name in (*FOLDER_NAMES, *COUNT_NAMES):
+                slots.pop(name, None)  # settings of the task, not text to type
+            if images.topic and not any(slot_kind(n, v) == ADDRESS for n, v in slots.items()):
+                slots["picture_search"] = search_address(images.topic)  # straight to picture results
         if self.text_writer is None:
             slots.update(template_slots(goal, slots))  # no model to compose with: plain filler text where asked
         text_source = TextSource(
@@ -296,7 +325,7 @@ class Agent:
         status = "aborted"
         message = ""
         pending: _Pending | None = None
-        low_confidence = stale = done_rejections = no_change = text_failures = handoffs = 0
+        low_confidence = stale = done_rejections = no_change = text_failures = handoffs = image_failures = 0
         password_typed = False  # since the last sign-in attempt
         sign_ins = 0  # sign-in attempts made after typing a password
         risk: StepRisk | None = None
@@ -311,6 +340,9 @@ class Agent:
         try:
             if reading.steps or reading.values:
                 yield emit(StepEvent(step=0, status="plan", action="PLAN", message=reading.summary()))
+            if images is not None:
+                wanted = f"save {images.count} pictures into {display_path(images.folder)}"
+                yield emit(StepEvent(step=0, status="plan", action="PLAN", message=wanted))
             if reading.questions and self.clarify is not None and cfg.ask_first:
                 asked = " · ".join(question for _, question in reading.questions)
                 yield emit(StepEvent(step=0, status="ask", action="ASK", message=asked))
@@ -337,6 +369,8 @@ class Agent:
                 t0 = self.clock()
                 try:
                     obs = self._observe(behind)
+                    if images is None:
+                        without_pictures(obs)
                     self.last_observation = obs
                 except StaleElementError as exc:
                     stale += 1
@@ -363,7 +397,8 @@ class Agent:
                     text_source.set_credentials(credential_slots(self.logins, obs, goal))
                     self._sensitive = text_source.sensitive_values()
                 can_hand_off = self.handoff is not None and handoffs < cfg.max_handoffs
-                space = self.router.space(obs, text_source, goal, handoff=can_hand_off)
+                saved = images.saved_urls if images is not None else None
+                space = self.router.space(obs, text_source, goal, handoff=can_hand_off, images=saved)
                 hints: list[Hint] = []
                 if self.retriever is not None:
                     hints = self.retriever.hints(goal, obs, space, exclude_episode=episode_id)
@@ -505,6 +540,23 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op)
                     event.status = "wait"
                     yield emit(event)
+                    continue
+
+                if op == SAVE_IMAGE and images is not None and decision.target is not None:
+                    steps += 1
+                    ok, detail = self._save_picture(decision, images, obs)
+                    image_failures = 0 if ok else image_failures + 1
+                    entry = {"step": steps, "action": decision.describe(), "result": detail}
+                    history.append(entry)
+                    self._record(episode_id, steps, obs, decision, outcome="changed" if ok else "failed")
+                    event.status, event.message = ("acted" if ok else "failed"), detail
+                    yield emit(event)
+                    if images.complete:
+                        status, message = "done", images.progress()
+                        break
+                    if image_failures >= MAX_IMAGE_FAILURES:
+                        status, message = "blocked", f"{image_failures} pictures in a row could not be saved ({detail})"
+                        break
                     continue
 
                 try:
@@ -769,6 +821,22 @@ class Agent:
         if moved and not watching and self.work is not None and self.work.same(after):  # only a window it put there
             cast(WindowFocuser, self.executor).bring_forward(before)
 
+    def _save_picture(self, decision: Decision, task: ImageTask, obs: Observation) -> tuple[bool, str]:
+        """SAVE_IMAGE: download the chosen picture into the run's folder. No dialogs, no keys, nothing on screen."""
+        element = decision.target.element if decision.target is not None else None
+        url = element.url if element is not None else None
+        if not url:
+            return False, "failed: this picture has no address"
+        task.saved_urls.add(url)  # tried: never offered again, whether it saves or not
+        if isinstance(self.executor, DryRunExecutor):
+            return True, f"dry run: would save it into {display_path(task.folder)}"
+        try:
+            path = self.image_saver.save(url, task.folder, file_stem(task, url), referer=obs.page_url)
+        except ImageSaveError as exc:
+            return False, f"failed: {exc}"
+        task.saved.append(path)
+        return True, f"saved {path.name} ({task.progress()})"
+
     def _open_requested_app(self, query: str) -> ActionResult:
         target = self.observer.find_app(query)
         if target is None:
@@ -851,6 +919,13 @@ class Agent:
 
 
 CONSOLE_NAVIGATION = frozenset({PRESS_KEY, MENU, OPEN_APP, FOCUS_WINDOW})
+
+
+def without_pictures(obs: Observation) -> None:
+    """Pictures are only offered to runs that save pictures; elsewhere they would only be noise in Jev's state."""
+    for element in obs.elements:
+        if SAVE_IMAGE in element.ops:
+            element.ops = tuple(op for op in element.ops if op != SAVE_IMAGE)
 
 
 def _typing_tip(text_source: TextSource) -> str:

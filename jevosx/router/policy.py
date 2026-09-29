@@ -8,14 +8,14 @@ cannot cause an action.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar, cast
 from urllib.parse import urlsplit
 
 from ..errors import JevResponseError, RouterContractError
 from ..executor.keys import KeyBinding
-from ..types import CLICK, TYPE_TEXT, Observation, clean_text, is_console_window
+from ..types import CLICK, SAVE_IMAGE, TYPE_TEXT, Observation, clean_text, is_console_window
 from .client import ChoiceAnswer, JevClient, JevResponse, choice_question
 from .prompts import MEMORY, NEXT_ACTION, PLAN, TARGET, TEXT_FOR_FIELD, TEXT_SLOT
 from .space import HEADS, ActionSpace, Target
@@ -27,7 +27,7 @@ CONSOLE_NOTE = (
     "The focused window is the JevOSX console that sends you commands; never act inside it. For web tasks open a "
     "new browser window (PRESS_KEY CMD_N or the New Window menu command); otherwise OPEN_APP the app the goal needs."
 )
-ELEMENT_HEADS = frozenset({HEADS[CLICK], HEADS[TYPE_TEXT]})
+ELEMENT_HEADS = frozenset({HEADS[CLICK], HEADS[TYPE_TEXT], HEADS[SAVE_IMAGE]})
 # The text question is answered before Jev knows which field it is for. Below this, once the field is chosen, Jev is
 # asked again with the field in view.
 TEXT_FOLLOW_UP_BELOW = 0.8
@@ -130,6 +130,12 @@ def same_destination(answer: ChoiceAnswer, targets: Mapping[str, Target]) -> Cho
     return ChoiceAnswer(answer.choice, answer.probabilities, max(answer.confidence, combined))
 
 
+def any_picture(answer: ChoiceAnswer) -> ChoiceAnswer:
+    """Every offered picture is photo-sized, on the page Jev chose to be on, and not saved yet. Jev spreading its
+    probability over several of them is taste, not doubt: which one is saved is not gated (the operation is)."""
+    return ChoiceAnswer(answer.choice, answer.probabilities, 1.0)
+
+
 class JevRouter:
     def __init__(
         self,
@@ -159,7 +165,15 @@ class JevRouter:
             offer_installed_apps=settings.offer_installed_apps,
         )
 
-    def space(self, obs: Observation, text_source: TextSource, goal: str = "", *, handoff: bool = False) -> ActionSpace:
+    def space(
+        self,
+        obs: Observation,
+        text_source: TextSource,
+        goal: str = "",
+        *,
+        handoff: bool = False,
+        images: Collection[str] | None = None,
+    ) -> ActionSpace:
         return ActionSpace.build(
             obs,
             keys=self.keys,
@@ -168,6 +182,7 @@ class JevRouter:
             goal=goal,
             offer_installed_apps=self.offer_installed_apps,
             handoff=handoff,
+            images=images,
         )
 
     def build_request(
@@ -237,6 +252,8 @@ class JevRouter:
                 decision.target_answer = _certain(next(iter(targets)))
             else:
                 decision.target_answer = same_destination(response.choice(head, targets), targets)
+                if decision.operation == SAVE_IMAGE:
+                    decision.target_answer = any_picture(decision.target_answer)
             decision.target = targets[decision.target_answer.choice]
             self._same_field(decision, response, space)
         if decision.operation == TYPE_TEXT:
@@ -470,8 +487,10 @@ def element_state(element: Any) -> dict[str, Any]:
     if states:
         out["state"] = states
     link = link_target(getattr(element, "url", None))
-    if link:
+    if link and element.kind != "image":
         out["to"] = link
+    if element.kind == "image" and element.frame is not None:
+        out["size"] = f"{round(element.frame.w)}x{round(element.frame.h)}"
     if element.ops:
         out["ops"] = list(element.ops)
     return out

@@ -14,6 +14,7 @@ from ..types import (
     MENU,
     OPEN_APP,
     PRESS_KEY,
+    SAVE_IMAGE,
     TYPE_TEXT,
     Action,
     AppInfo,
@@ -59,6 +60,8 @@ class SafetyPolicy:
                 return SafetyVerdict("deny", f"key {action.key.id} is denied")
             if action.key.id in self._confirm_keys:
                 return SafetyVerdict("confirm", f"key {action.key.id} ({action.key.description}) needs confirmation")
+        if action.operation == SAVE_IMAGE:
+            return SafetyVerdict("allow")  # a new file in the run's folder; a picture's caption is not a command
         label = ""
         if action.element is not None:
             label = action.element.label

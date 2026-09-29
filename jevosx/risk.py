@@ -4,8 +4,8 @@ One floor for every step made the agent ask about opening a browser window as of
 Steps are sorted into three tiers instead:
 
 - safe: undone in a moment, or changes nothing on its own: open or switch apps and windows, a new window or tab,
-  scroll, put the cursor in a field, type into a single-line or empty field, navigation keys, hand a step to the
-  person.
+  scroll, put the cursor in a field, type into a single-line or empty field, navigation keys, save a picture as a
+  new file, hand a step to the person.
 - routine: clicks on buttons, links and checkboxes, Return, menu commands, replacing text that is already there,
   DONE.
 - careful: what the safety policy wants confirmed (Delete, Send, Publish, Pay…) and keys that close or quit, and
@@ -34,6 +34,7 @@ from .types import (
     MENU,
     OPEN_APP,
     PRESS_KEY,
+    SAVE_IMAGE,
     SCROLL_DOWN,
     SCROLL_UP,
     TYPE_TEXT,
@@ -103,6 +104,8 @@ def _tier(action: Action, obs: Observation, safety: SafetyPolicy) -> tuple[str, 
         return SAFE, "scrolls"
     if op == ASK_USER:
         return SAFE, "hands the step to you"
+    if op == SAVE_IMAGE:
+        return SAFE, "saves a copy of a picture as a new file"
     if op == DONE:
         return ROUTINE, "ends the run"
     element = action.element

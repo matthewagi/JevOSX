@@ -7,7 +7,7 @@ question containing only compatible targets, and every target id resolves to a h
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,6 +23,7 @@ from ..types import (
     MENU,
     OPEN_APP,
     PRESS_KEY,
+    SAVE_IMAGE,
     SCROLL_DOWN,
     SCROLL_UP,
     TYPE_TEXT,
@@ -45,6 +46,7 @@ HEADS = {
     OPEN_APP: "app_target",
     FOCUS_WINDOW: "window_target",
     ASK_USER: "handoff_reason",
+    SAVE_IMAGE: "image_target",
 }
 OPERATION_TEXT = {
     CLICK: "Press or click an on-screen element: button, link, checkbox, tab, row, open-menu item, or focus a field.",
@@ -57,6 +59,7 @@ OPERATION_TEXT = {
     FOCUS_WINDOW: "Bring another window of the frontmost app to the front.",
     ASK_USER: "Hand control to the user for a step only they can do here (a verification code, a CAPTCHA, a passkey "
     "or Touch ID prompt, or information the goal does not give). The run continues after they finish.",
+    SAVE_IMAGE: "Save a picture shown on the page into the folder the goal asks for (one step: no dialogs).",
     WAIT: "Wait briefly for loading or an animation to finish.",
     DONE: "Every part of the goal is visibly complete.",
     BLOCKED: "No offered operation can make progress (missing information, permission, or control).",
@@ -158,7 +161,7 @@ class ActionSpace:
     def drop_elements(self, indices: set[int]) -> None:
         """Remove element targets whose rows were cut from the state (keeps ids == element table indices)."""
         keep = {str(i) for i in indices}
-        for op in (CLICK, TYPE_TEXT):
+        for op in (CLICK, TYPE_TEXT, SAVE_IMAGE):
             head = HEADS[op]
             if head in self.heads:
                 self.heads[head] = {k: t for k, t in self.heads[head].items() if k not in keep}
@@ -183,7 +186,10 @@ class ActionSpace:
         goal: str = "",
         offer_installed_apps: str = "mentioned",
         handoff: bool = False,
+        images: Collection[str] | None = None,
     ) -> ActionSpace:
+        """`images`: the addresses of pictures already saved in this run, or None when the goal saves no pictures
+        (then SAVE_IMAGE is not offered)."""
         heads: dict[str, dict[str, Target]] = {}
 
         def add(head: str, target: Target) -> None:
@@ -196,6 +202,13 @@ class ActionSpace:
         # Focused element first so truncation never drops it.
         ordered = [] if console else sorted(obs.elements, key=lambda e: not e.focused)
         for element in ordered:
+            if SAVE_IMAGE in element.ops and images is not None and element.url not in images:
+                images = {*images, element.url or ""}  # the same picture shown twice is offered once
+                picture: dict[str, Any] = {"picture": element.label}
+                if element.frame is not None:
+                    picture["size"] = f"{round(element.frame.w)}x{round(element.frame.h)}"
+                target = Target(str(element.index), picture, "img:" + element.signature, element=element)
+                add(HEADS[SAVE_IMAGE], target)
             if CLICK in element.ops:
                 add(HEADS[CLICK], _element_target(str(element.index), element))
             if TYPE_TEXT in element.ops and text_available:
@@ -261,9 +274,11 @@ class ActionSpace:
                 add(HEADS[ASK_USER], Target(reason, {"need": need}, "ask:" + reason))
 
         operations: dict[str, str] = {}
-        for op in (CLICK, TYPE_TEXT, MENU, PRESS_KEY, SCROLL_DOWN, SCROLL_UP, OPEN_APP, FOCUS_WINDOW, ASK_USER):
+        for op in (SAVE_IMAGE, CLICK, TYPE_TEXT, MENU, PRESS_KEY, SCROLL_DOWN, SCROLL_UP, OPEN_APP, FOCUS_WINDOW):
             if heads.get(HEADS[op]):
                 operations[op] = OPERATION_TEXT[op]
+        if heads.get(HEADS[ASK_USER]):
+            operations[ASK_USER] = OPERATION_TEXT[ASK_USER]
         for op in (WAIT, DONE, BLOCKED):
             operations[op] = OPERATION_TEXT[op]
 

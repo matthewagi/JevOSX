@@ -15,6 +15,8 @@ picks recognized text by id while the click point is computed locally.
 It can also:
 - write new text on the Mac (Apple's on-device model), for example "write a poem about autumn in TextEdit";
 - sign in to websites with logins kept in the macOS Keychain;
+- save pictures from the web into a folder in one step each, for example "find 3 photos of golden retrievers and save
+  them in a folder called dogs on my desktop";
 - hand a step to you (a 2FA code, a CAPTCHA) and carry on afterwards.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the research behind these and what comes next.

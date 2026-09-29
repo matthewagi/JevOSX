@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..errors import StaleElementError
+from ..images import MIN_SIDE, savable_url
 from ..types import (
     CLICK,
+    SAVE_IMAGE,
     SCROLL_DOWN,
     SCROLL_UP,
     TYPE_TEXT,
@@ -201,6 +203,11 @@ def url_text(value: Any) -> str | None:
     return text or None
 
 
+def is_picture(in_web: bool, rect: Rect | None, url: str | None) -> bool:
+    """A picture on a web page that can be saved: photo-sized (not an icon) and with an address to download."""
+    return in_web and rect is not None and min(rect.w, rect.h) >= MIN_SIDE and savable_url(url)
+
+
 def own_label(attrs: dict[str, Any], *, text_input: bool) -> str:
     for key in ("AXTitle", "AXDescription"):
         text = clean_text(attrs.get(key), 120)
@@ -358,6 +365,7 @@ class TreeWalker:
                 role in TEXT_INPUT_ROLES
                 or role in CLICKABLE_ROLES
                 or (limits.probe_generic and role in PROBE_ROLES and own_label(attrs, text_input=False))
+                or (role == "AXImage" and is_picture(frame.in_web, rect, url_text(attrs.get("AXURL"))))
             ):
                 element = self._make_element(frame, attrs, role, subrole, rect, enabled, secure)
                 if element is None and frame.owner is not None:
@@ -372,6 +380,8 @@ class TreeWalker:
                         text_chars += len(text) + 1
 
             owner = frame.owner
+            # A link card on a web page (a picture search result) is opened to find the picture inside it.
+            card = role == "AXLink" and frame.in_web and rect is not None and min(rect.w, rect.h) >= MIN_SIDE
             if element is not None:
                 if len(elements) >= limits.max_elements:
                     if not truncated:
@@ -388,13 +398,19 @@ class TreeWalker:
                             element.label = fallback
                         elif fallback:
                             pending_fallback[position] = fallback
-                    if role in ROW_ROLES or not element.label:
-                        owner = position
+                    if role in ROW_ROLES or not element.label or card:
+                        owner = position  # its text is already its label: not repeated as page text
 
             # Decide whether to descend.
             if role in LEAF_ROLES or frame.depth >= limits.max_depth:
                 continue
-            if element is not None and role not in DESCEND_CLICKABLES and element.label and role != "AXTextArea":
+            if (
+                element is not None
+                and role not in DESCEND_CLICKABLES
+                and element.label
+                and role != "AXTextArea"
+                and not card
+            ):
                 continue
             if role in TEXT_INPUT_ROLES and role != "AXComboBox":
                 continue
@@ -493,9 +509,11 @@ class TreeWalker:
                 actions = tuple(node.actions())
             except StaleElementError:
                 return None
-            if "AXPress" not in actions:
+            picture = role == "AXImage" and is_picture(frame.in_web, rect, url_text(attrs.get("AXURL")))
+            if "AXPress" not in actions and not picture:
                 return None
-            ops = (CLICK,)
+            ops = (SAVE_IMAGE, CLICK) if picture and "AXPress" in actions else (SAVE_IMAGE,) if picture else (CLICK,)
+            kind = "image" if picture else kind
         else:
             ops = (CLICK,)
             if role in ROW_ROLES:
@@ -533,7 +551,7 @@ class TreeWalker:
             identifier=identifier,
             in_web_area=frame.in_web,
             value_settable=value_settable,
-            url=url_text(attrs.get("AXURL")) if role == "AXLink" else None,
+            url=url_text(attrs.get("AXURL")) if role == "AXLink" or kind == "image" else None,
             frame=rect,
             actions=actions,
             node=node,

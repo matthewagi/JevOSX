@@ -204,6 +204,29 @@ Model Context Protocol over stdio), so the conversation is the person's own Clau
 - `jevosx mcp --install` writes the Claude desktop app's connector entry (with a backup) and prints the Claude Code
   command. The console's own Claude switch only shows once an API key is set.
 
+## Phase 10: saving pictures from the web (done, not yet seen live)
+
+Asked for: test tasks on the web such as "look for photos and save them in a folder", fast, without questions that
+are not needed and without detours.
+
+Before, saving one picture took about seven Jev decisions (open it, right-click, Save Image As…, Go to folder, a
+folder that may not exist, a file name, Save), there was no right-click at all, and the goal reader could ask where
+to save and how many before starting.
+
+- **SAVE_IMAGE** (`jevosx/images.py`). Photo-sized pictures on web pages that have an address (their AXURL) are
+  offered as targets; Jev picks one per step and it is downloaded straight into the folder. Never replaces a file,
+  only inside your home folder, only pictures (type checked), at most 25 MB.
+- **Folder and count come from the request** ("3 photos", "a folder called dogs on my desktop"). When it does not
+  say: ~/Pictures/<what they show>, and 5 pictures. Questions about either are dropped before starting.
+- **Straight to picture results.** The run gets a Google Images address for the topic as text to type, so the
+  browser lands on pictures in one step.
+- **Done when enough are saved**, without waiting for Jev to decide DONE. A saved picture is never offered again.
+- **Taste is not doubt.** Several equally good pictures split Jev's target probability; that choice is not gated
+  (the operation still is). Saving is a safe step.
+- Pictures are only offered to runs that save pictures, so other tasks' state does not grow.
+- To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
+  no `image` elements, that is the first thing to fix.
+
 ## Next research (not built yet)
 
 - **Icons without text.** OCR can't name a play-triangle button. Candidates:

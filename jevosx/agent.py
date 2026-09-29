@@ -781,7 +781,10 @@ class Agent:
                     pending = _Pending(step_id, entry, obs.fingerprint, op, reported=result.detail)
                 typed_any = typed_any or (result.ok and op == TYPE_TEXT)
                 fresh_document = fresh_document or ((result.ok or result.unconfirmed) and makes_document(action))
-                if result.ok and op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app):
+                if result.ok and (
+                    (op == TYPE_TEXT and action.submit and is_address_bar(action.element, obs.app))
+                    or follows_link(action, obs)
+                ):
                     navigation, page_reads = page_where(obs), PAGE_READS
                 event.status = "acted" if result.ok else "failed"
                 event.result = result
@@ -1185,6 +1188,20 @@ def blank_page(obs: Observation) -> bool:
     if obs.page_url:  # the title can lag behind the address
         return bool(BLANK_PAGE.match(obs.page_url))
     return bool(BLANK_TITLE.match(obs.window.title if obs.window else ""))
+
+
+def follows_link(action: Action, obs: Observation) -> bool:
+    """A click on a link in a web page, which opens another page. Seen live: after clicking Facebook's "Marketplace",
+    the settle read matched at once (nothing had changed yet), so Jev chose the home page's "Search Facebook" box and
+    searched all of Facebook instead of Marketplace."""
+    element = action.element
+    return (
+        action.operation == CLICK
+        and element is not None
+        and element.role == "AXLink"
+        and element.in_web_area
+        and obs.app.bundle_id in BROWSER_BUNDLES
+    )
 
 
 def page_arrived(obs: Observation, before: tuple[str, str]) -> bool:

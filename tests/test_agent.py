@@ -400,6 +400,57 @@ def test_done_is_rejected_while_the_page_stays_blank(tmp_path):
     assert [e.message for e in result.events if e.action == "DONE"][0] == "DONE rejected: the page has not loaded yet"
 
 
+def test_a_clicked_link_waits_for_its_page_before_jev_decides(tmp_path):
+    """Seen live: after clicking "Marketplace", Jev was asked about the page it was leaving and typed into its
+    "Search Facebook" box."""
+
+    def page(title, url, label):
+        def build():
+            obs = observation([element(1, "AXLink", label, in_web_area=True)], app=CHROME, window=title)
+            obs.page_url = url
+            return obs
+
+        return build
+
+    class SlowPage(FakeDesktop):
+        def __init__(self):
+            screens = {
+                "home": page("Facebook", "https://www.facebook.com/", "Marketplace"),
+                "market": page("Marketplace | Facebook", "https://www.facebook.com/marketplace/", "Tools"),
+            }
+            super().__init__(screens, "home", {})
+            self.reads = None
+
+        def execute(self, action, obs):
+            self.reads = 0
+            return super().execute(action, obs)
+
+        def observe(self):
+            if self.reads is not None:
+                self.reads += 1
+                if self.reads > 3:
+                    self.screen = "market"
+            return super().observe()
+
+    seen = []
+
+    def answer(body):
+        labels = [e["label"] for e in body["state"]["elements"]]
+        seen.append(labels)
+        if "Marketplace" not in labels:
+            return {"operation": "DONE"}
+        if "click_target" not in body["questions"]:  # the targets are offered once CLICK is chosen
+            return {"operation": "CLICK"}
+        return {"operation": "CLICK", "click_target": find_id(body, "click_target", "Marketplace")}
+
+    desktop = SlowPage()
+    agent, _, _ = make_agent(tmp_path, answer, desktop=desktop)
+    with agent:
+        result = agent.run("go to facebook marketplace", max_steps=3)
+    assert result.status == "done" and len(desktop.executed) == 1
+    assert seen == [["Marketplace"], ["Tools"]]  # never asked about the page it was leaving
+
+
 NOTES = AppInfo("Notes", "com.apple.Notes", pid=200)
 
 

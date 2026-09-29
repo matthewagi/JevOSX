@@ -318,6 +318,11 @@ to save and how many before starting.
   the completion. The read-back did not notice, because the field did contain the typed text. The agent then kept
   wanting to retype the same address (conf 0.06–0.16) and stopped. Forward Delete now goes before Return: it removes
   a selected completion and does nothing at the end of plain text.
+- Seen live (same goal, 16:12, after that fix): Jev clicked "Marketplace" (conf 0.97), the settle read matched at
+  once (59 ms: Facebook had not changed anything yet), and the next decision was made on the home page. Its only
+  search box is "Search Facebook", so the run searched all of Facebook (/search/top) and said DONE at 0.84. A click
+  on a link in a browser page now waits for the new page like Return in the address bar does (the address or title
+  must change, up to PAGE_READS reads).
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

@@ -68,8 +68,8 @@ def test_steps_are_sorted_by_what_a_mistake_would_cost(action, expected):
 
 
 def test_no_tier_floor_is_above_the_main_floor():
-    assert floors(AgentSettings()) == {SAFE: 0.35, ROUTINE: 0.5, CAREFUL: 0.65}
-    assert floors(AgentSettings(min_confidence=0.3)) == {SAFE: 0.3, ROUTINE: 0.3, CAREFUL: 0.3}
+    assert floors(AgentSettings()) == {SAFE: 0.2, ROUTINE: 0.3, CAREFUL: 0.65}
+    assert floors(AgentSettings(min_confidence=0.15)) == {SAFE: 0.15, ROUTINE: 0.15, CAREFUL: 0.15}
     assert floors(AgentSettings(min_confidence=0.9))[CAREFUL] == 0.9
 
 
@@ -113,7 +113,7 @@ def test_an_unsure_safe_step_runs_without_asking(tmp_path):
         confirm=lambda action, reason: asked.append(reason) or True,
     )
     assert desktop.executed == ['TYPE_TEXT [1] textfield "Address and search bar" <- facebook.com'] and asked == []
-    assert result.events[0].decision["risk"] == SAFE and result.events[0].decision["floor"] == 0.35
+    assert result.events[0].decision["risk"] == SAFE and result.events[0].decision["floor"] == 0.2
 
 
 def test_an_unsure_click_is_asked_about(tmp_path):
@@ -121,7 +121,7 @@ def test_an_unsure_click_is_asked_about(tmp_path):
     screens = {"form": lambda: observation([link, reload], app=CHROME)}
     run(
         tmp_path,
-        lambda body: {"operation": ("CLICK", 0.45), "click_target": find_id(body, "click_target", "Marketplace")},
+        lambda body: {"operation": ("CLICK", 0.25), "click_target": find_id(body, "click_target", "Marketplace")},
         screens,
         confirm=lambda action, reason: asked.append(reason) or True,
     )
@@ -151,3 +151,34 @@ def test_a_sure_consequential_step_still_needs_your_ok(tmp_path):
         confirm=lambda action, reason: asked.append(reason) or False,
     )
     assert asked == ["'Publish' looks consequential"] and desktop.executed == []
+
+
+def test_a_second_sign_in_attempt_asks_first():
+    password = element(
+        1, "AXTextField", "Password", subrole="AXSecureTextField", kind="text_input", secure=True, ops=("TYPE_TEXT",)
+    )
+    sign_in = element(2, "AXButton", "Sign in")
+    screens = {"form": lambda: observation([password, sign_in, reload], app=CHROME)}
+    desktop = FakeDesktop(screens, "form", {})  # the password is wrong: the form stays
+
+    def answer(body):
+        last = (body["state"].get("recent_actions") or [{"action": ""}])[-1]["action"]
+        if last.startswith("TYPE_TEXT"):
+            return {"operation": ("CLICK", 0.9), "click_target": (find_id(body, "click_target", "Sign in"), 0.9)}
+        return {"operation": ("TYPE_TEXT", 0.9), "type_text_target": "1"}
+
+    asked: list[str] = []
+    settings = Settings()
+    settings.agent.fallback_log = ""
+    settings.agent.stuck_after = 10  # the fake form never changes
+    agent = Agent(
+        observer=desktop,
+        executor=desktop,
+        router=JevRouter(scripted_client(answer), keys=KEYS),
+        settings=settings,
+        confirm=lambda action, reason: asked.append(reason) or False,
+        sleep=lambda _s: None,
+    )
+    agent.run("sign in", text_slots={"password": "hunter2"}, max_steps=4)
+    clicks = [a for a in desktop.executed if a.startswith("CLICK")]
+    assert len(clicks) == 1 and len(asked) == 1 and "locked" in asked[0]  # the first attempt ran, the second asked

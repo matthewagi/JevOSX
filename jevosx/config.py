@@ -146,10 +146,11 @@ class AgentSettings:
     # Confidence gate: an action (or DONE) is only executed when Jev's confidence for the operation AND for the
     # chosen target are at least this floor. Otherwise the fallback policy runs and nothing is executed blindly.
     min_confidence: float = 0.65
-    # Steps that are easily undone need less (see jevosx/risk.py): opening windows, switching apps, scrolling,
-    # typing into a field (safe), and clicks, Return, menu commands, DONE (routine). Never above min_confidence.
-    safe_confidence: float = 0.35
-    routine_confidence: float = 0.5
+    # Steps without consequences need far less (see jevosx/risk.py): opening windows, switching apps, scrolling,
+    # typing into a field (safe), and clicks, Return, menu commands, DONE (routine). A wrong one costs a step, not a
+    # post you have to take down. Never above min_confidence, which is for steps with consequences.
+    safe_confidence: float = 0.2
+    routine_confidence: float = 0.3
     low_confidence_policy: str = "retry"  # retry (re-observe) | ask (human approves) | stop
     # In the web console someone is watching, so an unsure step is shown for approval instead of re-asked.
     console_low_confidence_policy: str = "ask"

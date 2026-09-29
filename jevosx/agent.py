@@ -29,13 +29,13 @@ from .errors import (
     TextUnavailableError,
 )
 from .executor.base import DryRunExecutor, Executor, WindowFocuser
-from .executor.safety import SafetyPolicy
+from .executor.safety import SafetyPolicy, SafetyVerdict
 from .logins import LoginStore, credential_slots
 from .memory.retriever import Hint, MemoryRetriever, state_summary
 from .memory.store import MemoryStore
 from .observer.base import BackgroundObserver, Observer, WindowRef
 from .planner import GoalReading, Planner, merge_slots
-from .risk import CAREFUL, StepRisk, assess
+from .risk import CAREFUL, StepRisk, assess, is_sign_in
 from .router.policy import Decision, JevRouter, redact
 from .router.text import TextSource, slots_from_goal, template_slots
 from .types import (
@@ -290,6 +290,9 @@ class Agent:
         message = ""
         pending: _Pending | None = None
         low_confidence = stale = done_rejections = no_change = text_failures = handoffs = 0
+        password_typed = False  # since the last sign-in attempt
+        sign_ins = 0  # sign-in attempts made after typing a password
+        risk: StepRisk | None = None
 
         def emit(event: StepEvent) -> StepEvent:
             events.append(event)
@@ -393,6 +396,7 @@ class Agent:
 
                 # Confidence gate: nothing (not even DONE) is acted on below its floor. WAIT is harmless.
                 person_approved = False
+                risk = None
                 if op != WAIT and self._console_navigation(decision, obs):
                     event.message = (
                         f"moving away from the console (confidence {decision.gate_confidence:.2f}; not gated)"
@@ -405,6 +409,7 @@ class Agent:
                         safety=self.safety,
                         hints=hints,
                         target_id=decision.target.id if decision.target else None,
+                        sign_ins=sign_ins,
                     )
                     if event.decision is not None:
                         event.decision.update(risk=risk.tier, floor=risk.floor, risk_reason=risk.reason)
@@ -498,6 +503,8 @@ class Agent:
                 verdict = self.safety.check(
                     action, obs.app, window_title=obs.window.title if obs.window else None, page_url=obs.page_url
                 )
+                if risk is not None and risk.confirm and verdict.verdict == "allow":
+                    verdict = SafetyVerdict("confirm", risk.reason)
                 # A step you just approved is not asked about again, unless it types text you have not seen yet.
                 asked_already = person_approved and action.operation != TYPE_TEXT
                 if verdict.verdict == "deny" or (
@@ -530,7 +537,12 @@ class Agent:
 
                 t4 = self.clock()
                 before = self._front() if behind else None
+                attempt = password_typed and is_sign_in(action, obs)
                 result = self.executor.execute(action, obs)
+                if result.ok and action.operation == TYPE_TEXT and action.text_is_secret:
+                    password_typed = True
+                if result.ok and attempt:
+                    sign_ins, password_typed = sign_ins + 1, False
                 t5 = self.clock()
                 if result.ok and action.operation != OPEN_APP:
                     self._settle()

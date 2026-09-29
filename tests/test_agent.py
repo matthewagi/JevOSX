@@ -128,8 +128,8 @@ def fallback_records(tmp_path):
 
 
 def unsure(body):
-    """Jev answers CLICK, but with only 0.40 confidence."""
-    return {"operation": ("CLICK", 0.4), "click_target": find_id(body, "click_target", "New Document")}
+    """Jev answers CLICK, but with only 0.25 confidence."""
+    return {"operation": ("CLICK", 0.25), "click_target": find_id(body, "click_target", "New Document")}
 
 
 def test_default_confidence_floor_is_065():
@@ -143,14 +143,14 @@ def test_low_confidence_is_withheld_logged_and_retried_then_stops(tmp_path):
     assert result.status == "low_confidence" and desktop.executed == []
     assert [e.status for e in result.events] == ["low_confidence"] * 3
     records = fallback_records(tmp_path)
-    assert len(records) == 3 and records[0]["resolution"] == "retry" and records[0]["confidence"] == 0.4
-    assert records[0]["floor"] == 0.5 and records[0]["decision"]["operation"] == "CLICK"  # a click is routine
+    assert len(records) == 3 and records[0]["resolution"] == "retry" and records[0]["confidence"] == 0.25
+    assert records[0]["floor"] == 0.3 and records[0]["decision"]["operation"] == "CLICK"  # a click is routine
     assert records[0]["risk"] == "routine step: clicks a control"
 
 
 def test_low_target_confidence_is_gated_even_when_operation_is_confident(tmp_path):
     def answer(body):
-        return {"operation": ("CLICK", 0.95), "click_target": (find_id(body, "click_target", "New Document"), 0.3)}
+        return {"operation": ("CLICK", 0.95), "click_target": (find_id(body, "click_target", "New Document"), 0.2)}
 
     settings = Settings()
     settings.agent.low_confidence_policy = "stop"
@@ -163,7 +163,7 @@ def test_low_target_confidence_is_gated_even_when_operation_is_confident(tmp_pat
 def test_low_confidence_done_does_not_end_the_run(tmp_path):
     settings = Settings()
     settings.agent.low_confidence_policy = "stop"
-    agent, _, _ = make_agent(tmp_path, lambda body: {"operation": ("DONE", 0.4)}, settings=settings)
+    agent, _, _ = make_agent(tmp_path, lambda body: {"operation": ("DONE", 0.25)}, settings=settings)
     with agent:
         assert agent.run("anything").status == "low_confidence"
 
@@ -188,7 +188,7 @@ def test_custom_low_confidence_handler(tmp_path):
     agent.on_low_confidence = lambda exc, obs: seen.append(exc.confidence) or "stop"
     with agent:
         assert agent.run("anything").status == "low_confidence"
-    assert seen == [0.4] and desktop.executed == []
+    assert seen == [0.25] and desktop.executed == []
 
 
 def test_stale_targets_are_never_executed(tmp_path):
@@ -294,7 +294,7 @@ def test_leaving_the_console_is_not_held_back_but_content_actions_are(tmp_path):
     def answer(body):
         if "never act inside it" in body["state"]["desktop"].get("note", ""):
             return {"operation": ("PRESS_KEY", 0.55), "key_target": ("CMD_N", 0.9)}
-        return {"operation": ("TYPE_TEXT", 0.3)}
+        return {"operation": ("TYPE_TEXT", 0.15)}
 
     desktop = console_desktop()
     agent, _, _ = make_agent(tmp_path, answer, desktop=desktop, memory=False)
@@ -302,7 +302,7 @@ def test_leaving_the_console_is_not_held_back_but_content_actions_are(tmp_path):
         result = agent.run("look for pictures of flowers red")
     assert desktop.executed[0] == "PRESS_KEY CMD_N (cmd+n)"
     assert result.events[0].status == "acted" and "not gated" in result.events[0].message
-    assert all("TYPE_TEXT" not in a for a in desktop.executed)  # typing at 0.30 stays withheld
+    assert all("TYPE_TEXT" not in a for a in desktop.executed)  # typing at 0.15 stays withheld
     assert result.status == "low_confidence"
 
     settings = Settings()

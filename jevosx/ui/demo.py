@@ -972,7 +972,7 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         return answer(CLICK, confidence, click_target=(best[2], confidence))
     if goal_words and question and not touched:
         # Nothing on screen matches the request: a low-confidence guess that the confidence gate should withhold.
-        return answer(CLICK, 0.38, click_target=(next(iter(question["criteria"])), 0.3))
+        return answer(CLICK, 0.24, click_target=(next(iter(question["criteria"])), 0.15))
     return answer("BLOCKED", 0.82)
 
 

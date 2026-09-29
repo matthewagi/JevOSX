@@ -8,7 +8,8 @@ Steps are sorted into three tiers instead:
   person.
 - routine: clicks on buttons, links and checkboxes, Return, menu commands, replacing text that is already there,
   DONE.
-- careful: what the safety policy wants confirmed (Delete, Send, Publish, Pay…) and keys that close or quit.
+- careful: what the safety policy wants confirmed (Delete, Send, Publish, Pay…) and keys that close or quit, and
+  a second sign-in attempt in a run: failed logins can lock an account, so that one always asks the person.
 
 Each tier has its own floor (agent.safe_confidence, agent.routine_confidence, agent.min_confidence), never above
 agent.min_confidence, so raising the floor still makes every step more careful. A step that matches one that worked
@@ -17,6 +18,7 @@ in a similar earlier run counts as safe (careful ones stay careful): a step you 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
@@ -53,6 +55,7 @@ SAFE_CLICK_ROLES = frozenset(
      "AXRadioButton", "AXRow", "AXTab"}
 )  # fmt: skip
 REMEMBERED_SCORE = 0.6  # how similar an earlier run must be for its step to count as remembered
+SIGN_IN = re.compile(r"\b(?:log ?in|sign ?in|log on)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,7 @@ class StepRisk:
     tier: str
     floor: float
     reason: str
+    confirm: bool = False  # ask the person whatever Jev's confidence (a repeated sign-in attempt)
 
     def describe(self) -> str:
         return f"{self.tier} step: {self.reason}"
@@ -78,8 +82,13 @@ def assess(
     safety: SafetyPolicy,
     hints: Sequence[Hint] = (),
     target_id: str | None = None,
+    sign_ins: int = 0,
 ) -> StepRisk:
-    """The tier and floor for a decided step (`action` is its preview: no text resolved yet)."""
+    """The tier and floor for a decided step (`action` is its preview: no text resolved yet). `sign_ins` counts the
+    sign-in attempts already made in this run with a typed password."""
+    if sign_ins and is_sign_in(action, obs):
+        why = "another sign-in attempt: if the password is wrong again, the account could be locked"
+        return StepRisk(CAREFUL, floors(settings)[CAREFUL], why, confirm=True)
     tier, reason = _tier(action, obs, safety)
     if tier != CAREFUL and _remembered(action.operation, target_id, hints):
         tier, reason = SAFE, "worked in a similar earlier run"
@@ -127,6 +136,16 @@ def _tier(action: Action, obs: Observation, safety: SafetyPolicy) -> tuple[str, 
             return ROUTINE, "follows a link"
         return ROUTINE, "clicks a control"
     return ROUTINE, "acts"
+
+
+def is_sign_in(action: Action, obs: Observation) -> bool:
+    """A step that submits a sign-in: a Sign in / Log in control, or Return in a password field."""
+    if action.operation in (CLICK, MENU) and action.element is not None:
+        return bool(SIGN_IN.search(action.element.label or ""))
+    if action.operation == PRESS_KEY and action.key is not None and action.key.id == "RETURN":
+        focused = obs.focused_element
+        return focused is not None and focused.secure
+    return False
 
 
 def _remembered(operation: str, target_id: str | None, hints: Sequence[Hint]) -> bool:

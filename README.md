@@ -205,9 +205,12 @@ a wrong step would cost (`jevosx/risk.py`):
 
 | Tier | Steps | Floor |
 | --- | --- | --- |
-| safe | open or switch apps and windows, new window or tab, scroll, put the cursor in a field, type into a single-line or empty field, navigation keys (`CMD_L`, `TAB`, arrows…), hand a step to you | `agent.safe_confidence`, **0.35** |
-| routine | clicks on buttons, links and checkboxes, `RETURN`, menu commands, replacing text that is already there, `DONE` | `agent.routine_confidence`, **0.5** |
-| careful | anything the safety policy wants confirmed (Delete, Send, Publish, Pay…), `CMD_W`, `CMD_Q` | `agent.min_confidence`, **0.65** |
+| safe | open or switch apps and windows, new window or tab, scroll, put the cursor in a field, type into a single-line or empty field, navigation keys (`CMD_L`, `TAB`, arrows…), hand a step to you | `agent.safe_confidence`, **0.2** |
+| routine | clicks on buttons, links, checkboxes and list options, `RETURN`, menu commands, replacing text that is already there, `DONE` | `agent.routine_confidence`, **0.3** |
+| careful | steps with consequences: anything the safety policy wants confirmed (Delete, Send, Publish, Post, Pay…), `CMD_W`, `CMD_Q`, and a second sign-in attempt in a run (failed logins can lock an account). These also ask you. | `agent.min_confidence`, **0.65** |
+
+A wrong safe or routine step costs a step, which the agent notices and corrects; a wrong careful step is a post you
+have to take down. So only careful steps are held back hard.
 
 No tier's floor is ever above `agent.min_confidence`, so raising it (the console's *Confidence floor*, or
 `--min-confidence`) makes every step more careful. A step that matches one that worked in a similar earlier run

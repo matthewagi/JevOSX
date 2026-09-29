@@ -181,3 +181,18 @@ def test_without_a_writer_a_listing_still_gets_plain_filler_text():
 )
 def test_one_destination_is_offered_once(model, patterns, expected):
     assert merge_slots(model, patterns) == expected
+
+
+def test_a_listing_gets_a_category_from_the_model_but_facts_only_the_person_knows_are_not_invented():
+    from jevosx.planner import READER_INSTRUCTIONS
+    from jevosx.router.text import TextSource
+    from jevosx.types import AppInfo
+
+    assert "category: Tools" in READER_INSTRUCTIONS and "condition" in READER_INSTRUCTIONS
+    steps, values = parse_reading("STEPS:\n1. Open Marketplace\n2. Fill in the listing\nVALUES:\ncategory: Tools")
+    assert values == {"category": "Tools"}
+    chrome = AppInfo("Google Chrome", "com.google.Chrome", pid=1)
+    text = TextSource({"website": "facebook.com/marketplace/create/item", "title": "Welding gun", **values})
+    category = element(3, "AXComboBox", "Category", kind="text_input", in_web_area=True)
+    bar = element(1, "AXTextField", "Address and search bar", kind="text_input")
+    assert "category" in text.compatible(category, chrome) and text.compatible(bar, chrome) == ["website"]

@@ -48,8 +48,11 @@ VALUES: every piece of text the assistant will have to type, one per line, each 
 - amounts as numbers only, for example price: 40
 - when the request asks for new text (a description, a message, generic text, a poem), write that text in full as
   the value, on one line, for example description: ...
-Never include passwords or codes. Never invent personal details (names, emails, phone numbers, addresses) that are
-not in the request. If nothing needs typing, write: VALUES: none"""
+- when the request is to sell or list an item, also the everyday category it belongs in, even if the request does
+  not name it, for example category: Tools
+Never include passwords or codes. Never invent personal details (names, emails, phone numbers, addresses) or facts
+only the person knows (an item's condition, age or size) that are not in the request. If nothing needs typing,
+write: VALUES: none"""
 
 _MULTI_PART = re.compile(r",|;|\bthen\b|\band\b|\bafter(?:wards)?\b|\bnext\b|\bfinally\b", re.IGNORECASE)
 _STEP = re.compile(r"^\s*(?:\d{1,2}\s*[.)]|[-•*])\s*(?P<text>.+?)\s*$")

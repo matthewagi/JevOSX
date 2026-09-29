@@ -153,6 +153,10 @@ the outcome.
 - **One address bar.** Chrome can list a second copy of its address bar with another value; only one is offered.
 - **Look again before asking.** With "ask", an unsure step is re-observed once before you are asked
   (`agent.ask_after_retries`); pages that are still loading made many of the questions.
+- **Values the request implies.** Seen live: the listing stopped at Category, which the request never names. The
+  on-device model now also gives the everyday category of an item to sell ("category: Tools"), so it can be
+  typed or chosen from the list. Facts only the person knows (condition, age, size) are never invented: the
+  agent hands those to you (`ASK_USER`, "provide information the goal does not include").
 - Next: calibrate the tiers from the fallback log (how often an approved step was right) instead of fixed numbers.
 
 ## Next research (not built yet)

@@ -72,6 +72,7 @@ def run_to_end(manager, goal, *, approve=None, timeout=10, **options):
                 d.apps["Safari"].listing is not None
                 and d.apps["Safari"].listing.get("Title") == "Plastic welding gun"
                 and d.apps["Safari"].listing.get("Price") == "40"
+                and d.apps["Safari"].listing.get("Category") == "Tools"  # decided by the (simulated) model
                 and len(d.apps["Safari"].listing.get("Description", "")) > 40
                 and not d.apps["Safari"].published
             ),

@@ -58,7 +58,7 @@ class Spec:
     web: bool = False  # inside the web page (not the browser's toolbar)
 
     def build(self, index: int) -> UIElement:
-        text_input = self.role in ("AXTextField", "AXTextArea")
+        text_input = self.role in ("AXTextField", "AXTextArea", "AXComboBox")
         ops = TEXT_OPS if text_input else ((CLICK,) if self.role != "AXStaticText" else ())
         secure = self.subrole == "AXSecureTextField"
         kind = "text_input" if text_input else "row" if self.role == "AXRow" else "control"
@@ -324,6 +324,7 @@ class Safari(DemoApp):
             Spec("AXButton", "Add photos", container=page, web=True),
             Spec("AXTextField", "Title", value=form.get("Title", ""), container=page, web=True),
             Spec("AXTextField", "Price", value=form.get("Price", ""), container=page, web=True),
+            Spec("AXComboBox", "Category", value=form.get("Category", ""), container=page, web=True),
             Spec("AXPopUpButton", "Condition", value="New", container=page, web=True),
             Spec("AXTextArea", "Description", value=form.get("Description", ""), container=page, web=True),
             Spec("AXButton", "Publish", container=page, web=True),
@@ -405,7 +406,7 @@ class Safari(DemoApp):
         return f"opened {name}"
 
     def type(self, label: str, text: str) -> str:
-        if self.listing is not None and label in ("Title", "Price", "Description"):
+        if self.listing is not None and label in ("Title", "Price", "Category", "Description"):
             self.listing[label] = text
         elif label == "Username or email address":
             self.username = text
@@ -637,6 +638,8 @@ class DemoDesktop:
             keys = action.element.kind == "keyboard" or action.element.secure
             detail = app.type(action.element.label, action.text)
             method = "keystrokes (simulated)" if keys else "AXValue (simulated)"
+            if action.submit:  # an address typed into the address bar: Return opens it
+                detail = f"{detail}; {app.key('RETURN')}"
         elif op == MENU and action.element is not None:
             detail, method = app.command(action.element.label), "AXPress menu item (simulated)"
         elif op == PRESS_KEY and action.key is not None:
@@ -830,7 +833,12 @@ def simulated_decisions(body: dict[str, Any]) -> dict[str, Pick]:
         offered = questions.get("text_slot", {}).get("criteria", {})
         fields = questions.get("type_text_target")
         if "title" in by_label:
-            wanted_slots = {"title": ("title",), "price": ("price",), "description": ("description",)}
+            wanted_slots = {
+                "title": ("title",),
+                "price": ("price",),
+                "category": ("category",),
+                "description": ("description",),
+            }
             for label, slot_names in wanted_slots.items():
                 if by_label[label].get("value") or TYPE_TEXT not in ops:
                     continue

@@ -6,6 +6,12 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+# The demo's stand-in for the model's judgement of an item's category.
+_CATEGORIES = (
+    ("Tools", r"gun|drill|saw|welder|welding|hammer|wrench|sander|grinder|tool"),
+    ("Furniture", r"chair|table|sofa|desk|bed|shelf|wardrobe"),
+    ("Electronics", r"phone|laptop|tv|camera|console|headphones|speaker"),
+)
 _ABOUT = re.compile(r"\babout\s+(?P<topic>.+?)(?=\s+(?:in|on|into|to|and|then|using|with)\b|[,.;!?\"“]|$)", re.I)
 
 
@@ -54,6 +60,9 @@ class SimulatedWriter:
         values = {"website" if name.startswith("url") else name: value for name, value in slots.items()}
         if re.search(r"\b(generic|some|short)\s+text\b|\bdescription\b", request, re.I) and "title" in values:
             values["description"] = listing_description(values["title"])
+        if "title" in values and re.search(r"\b(?:sell|selling|listing)\b", request, re.I):
+            title = values["title"].lower()
+            values["category"] = next((c for c, words in _CATEGORIES if re.search(words, title)), "Miscellaneous")
         lines += [f"{name}: {value}" for name, value in values.items()] or ["none"]
         return "\n".join(lines)
 

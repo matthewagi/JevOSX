@@ -987,12 +987,13 @@ class Agent:
         if isinstance(self.executor, DryRunExecutor):
             return True, f"dry run: would save it into {display_path(task.folder)}"
         original = (
-            self._original(element, obs, task)
-            if element is not None and is_thumbnail(url, obs.page_url)
-            else wikimedia_original(url)
+            self._original(element, obs, task) if element is not None and is_thumbnail(url, obs.page_url) else None
         )
+        # Seen live: Google's link for a Wikipedia picture is Wikimedia's 330-pixel thumbnail, so both are looked at.
+        full = wikimedia_original(original or url)
+        sources = list(dict.fromkeys(s for s in (full, original, url) if s))
         failure: ImageSaveError | None = None
-        for source in (original, url) if original else (url,):  # a site that refuses: Google's copy is still good
+        for source in sources:  # a site that refuses or a file too large: the smaller copy is still good
             try:
                 path = self.image_saver.save(source, task.folder, file_stem(task, source), referer=obs.page_url)
                 break
@@ -1000,8 +1001,7 @@ class Agent:
                 failure = exc
         else:
             return False, f"failed: {failure}"
-        if original:
-            task.saved_urls.add(original)
+        task.saved_urls.update(sources)
         task.saved.append(path)
         if obs.page_url:
             task.pages.add(page_key(obs.page_url))

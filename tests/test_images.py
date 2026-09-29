@@ -2,6 +2,7 @@
 
 import base64
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -388,6 +389,7 @@ class GoogleResults(FakeDesktop):
         super().__init__({}, "results", {})
         self.open: int | None = None
         self.half_built = 0  # reads that have only the page's header, as while Chrome rebuilds the results
+        self.original = "https://site.example/{}.jpg"  # where each tile's picture comes from
 
     def observe(self):
         if self.half_built > 0:
@@ -401,8 +403,8 @@ class GoogleResults(FakeDesktop):
             label = f"Golden retriever {self.open}"
             extra = [
                 element(20, "AXLink", label, in_web_area=True,
-                        url=f"https://www.google.com/imgres?q=dogs&imgurl=https%3A%2F%2Fsite.example%2F{self.open}.jpg"),
-                picture(21, label, f"https://site.example/{self.open}.jpg?w=1200"),
+                        url=f"https://www.google.com/imgres?q=dogs&imgurl={quote(self.original.format(self.open))}"),
+                picture(21, label, f"{self.original.format(self.open)}?w=1200"),
             ]  # fmt: skip
         obs = observation([*tiles, *extra], app=CHROME, window="golden retrievers - Google Search")
         obs.page_url = "https://www.google.com/search?q=golden+retrievers&udm=2"
@@ -643,3 +645,19 @@ def test_keeps_the_wikimedia_thumbnail_when_the_original_is_too_large(tmp_path, 
     result = agent.run("save 1 photo of the Eiffel Tower to a folder called paris", max_steps=3)
     assert result.status == "done"
     assert [("/thumb/" in u) for u in downloads] == [False, True]  # the original refused, then the thumbnail
+
+
+def test_saves_the_wikimedia_original_behind_a_google_thumbnail(tmp_path, monkeypatch):
+    """Seen live: through Google's results, the Wikipedia picture's original was Wikimedia's 330-pixel thumbnail."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = []
+
+    def serve(request):
+        downloads.append(str(request.url))
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    desktop = GoogleResults()
+    desktop.original = WIKI_THUMB.replace("{}", "{0}")
+    result = google_agent(desktop, serve).run("save 1 photo of golden retrievers on my desktop", max_steps=3)
+    assert result.status == "done"
+    assert downloads == ["https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel_0.jpg"]

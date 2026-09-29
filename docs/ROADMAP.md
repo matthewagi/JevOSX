@@ -284,6 +284,9 @@ to save and how many before starting.
 - Seen live (Eiffel Tower photos, 14:14): the picture saved from Wikipedia was its 330 by 550 thumbnail. A picture
   whose address is a Wikimedia thumbnail (upload.wikimedia.org/…/thumb/…/NNNpx-name) is now saved from the original
   file; the size cap still holds, and when the original is refused or too large the thumbnail is saved instead.
+- Seen live (paris2, 14:21): still 330 by 550, because the picture came through Google's results, whose link
+  (imgres) for a Wikipedia picture is Wikimedia's thumbnail. The original found behind a Google tile now goes
+  through the same mapping.
 - Seen live (14:12): the on-device reader's plan for a Notes task was "open Finder · open Applications · open Notes"
   (and "open Finder" for photos before). When a plan step opens an app the goal names, steps that open Finder, the
   Applications folder, Launchpad, Spotlight or the Dock are dropped (OPEN_APP launches the app directly), unless the

@@ -274,8 +274,8 @@ to save and how many before starting.
   -25205 counts as done when the next read shows the UI changed.
 - Seen live (the Notes retry after that fix, 14:04): DONE at confidence 0.92 straight after OPEN_APP, twice,
   because the list the 12:37 run had written was open and memory said that run finished there. A goal that asks for
-  text to be written ("write a …", see `wants_generation`) is now not accepted as DONE before a TYPE_TEXT in the
-  same run has succeeded.
+  text to be written ("write a …", see `wants_generation`) is not offered DONE until a TYPE_TEXT in the same run
+  has succeeded (rejecting DONE was not enough: Jev said DONE three more times after being told).
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

@@ -473,6 +473,10 @@ class Agent:
                 can_hand_off = self.handoff is not None and handoffs < cfg.max_handoffs
                 saved = images.saved_urls if images is not None else None
                 space = self.router.space(obs, text_source, goal, handoff=can_hand_off, images=saved)
+                if asks_writing and not typed_any:
+                    # Seen live: "write a shopping list" in Notes ended DONE right after OPEN_APP, three times after
+                    # being told nothing was written, because the list an earlier run had written was open.
+                    space.operations.pop(DONE, None)
                 hints: list[Hint] = []
                 if self.retriever is not None:
                     hints = self.retriever.hints(goal, obs, space, exclude_episode=episode_id)
@@ -613,18 +617,6 @@ class Agent:
                         status, message = "failed", "the page did not load"
                         break
                     page_reads = PAGE_READS
-                    continue
-                if op == DONE and asks_writing and not typed_any:
-                    # Seen live: "write a shopping list" in Notes ended DONE right after OPEN_APP, because the list an
-                    # earlier run had written was open (and memory said that run finished there).
-                    done_rejections += 1
-                    steps += 1
-                    history.append({"step": steps, "action": "DONE", "result": "rejected: nothing written yet"})
-                    event.status, event.message = "failed", "DONE rejected: nothing has been written in this run yet"
-                    yield emit(event)
-                    if done_rejections > cfg.max_done_rejections:
-                        status, message = "failed", "Jev said DONE before writing anything"
-                        break
                     continue
                 if op == DONE:
                     if verifier is not None and not verifier(obs):

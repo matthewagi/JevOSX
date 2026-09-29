@@ -504,13 +504,14 @@ def test_a_goal_to_write_is_not_done_before_anything_was_typed(tmp_path):
     )
     desktop = FakeDesktop({"note": lambda: earlier}, "note", {})
 
-    def done_unless_told(body):
-        rejected = "nothing written yet" in json.dumps(body["state"]["recent_actions"])
-        typed = "TYPE_TEXT" in json.dumps(body["state"]["recent_actions"])
-        return {"operation": "TYPE_TEXT"} if rejected and not typed else {"operation": "DONE"}
+    offered = []
 
-    agent, _, _ = make_agent(tmp_path, done_unless_told, desktop=desktop)
+    def done_when_offered(body):
+        offered.append("DONE" in body["questions"]["operation"]["criteria"])
+        return {"operation": "DONE"} if offered[-1] else {"operation": "TYPE_TEXT"}
+
+    agent, _, _ = make_agent(tmp_path, done_when_offered, desktop=desktop)
     with agent:
         result = agent.run("write a shopping list: milk, eggs, bread", text_slots={"list": "milk, eggs, bread"})
-    assert [e.status for e in result.events] == ["failed", "acted", "done"] and result.status == "done"
+    assert offered == [False, True] and result.status == "done"
     assert len(desktop.executed) == 1 and desktop.executed[0].startswith("TYPE_TEXT")

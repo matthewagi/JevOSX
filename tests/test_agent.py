@@ -240,6 +240,20 @@ def test_safety_denies_password_typing_without_secret_slot(tmp_path):
     assert policy.check(Action("OPEN_APP", app=keychain), frontmost).verdict == "deny"
 
 
+def test_safety_never_answers_a_macos_permission_prompt():
+    """Seen live: the "Accessibility Access" prompt was in front and Jev clicked Deny at confidence 0.36."""
+    from jevosx.executor.safety import SafetyPolicy
+    from jevosx.types import Action
+
+    policy = SafetyPolicy()
+    prompt = AppInfo("universalAccessAuthWarn", "com.apple.accessibility.universalAccessAuthWarn", pid=9)
+    deny = element(2, "AXButton", "Deny", ops=("CLICK",))
+    assert policy.check(Action("CLICK", element=deny), prompt).verdict == "deny"
+    assert policy.check(Action("PRESS_KEY"), prompt).verdict == "deny"
+    textedit = AppInfo("TextEdit", "com.apple.TextEdit")
+    assert policy.check(Action("OPEN_APP", app=textedit), prompt).allowed  # leaving the prompt is fine
+
+
 def test_safety_never_acts_inside_the_console_window():
     from jevosx.executor.keys import key_vocabulary
     from jevosx.executor.safety import SafetyPolicy

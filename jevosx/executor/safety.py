@@ -22,6 +22,11 @@ from ..types import (
 )
 
 Verdict = Literal["allow", "confirm", "deny"]
+# macOS permission and password prompts: granting or refusing access is the person's decision, never the agent's.
+SYSTEM_PROMPT_APPS = frozenset(
+    {"com.apple.accessibility.universalAccessAuthWarn", "com.apple.UserNotificationCenter", "com.apple.SecurityAgent",
+     "com.apple.CoreServicesUIAgent", "com.apple.tccd"}
+)  # fmt: skip
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +57,8 @@ class SafetyPolicy:
                 return SafetyVerdict("deny", "only new-window/tab shortcuts are allowed in the JevOSX console window")
             if action.operation == MENU and not (action.element and CONSOLE_SAFE_MENU.search(action.element.label)):
                 return SafetyVerdict("deny", "only New Window/Tab menu commands are allowed in the JevOSX console")
+        if action.operation != OPEN_APP and frontmost.bundle_id in SYSTEM_PROMPT_APPS:
+            return SafetyVerdict("deny", "a macOS permission or password prompt is for you to answer")
         target_app = action.app if action.operation == OPEN_APP else frontmost
         if target_app is not None and self._denied_app(target_app):
             return SafetyVerdict("deny", f"{target_app.name} is on the deny list")

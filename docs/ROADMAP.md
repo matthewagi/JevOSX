@@ -257,6 +257,10 @@ to save and how many before starting.
   which cannot see TextEdit running with no document window: OPEN_APP TextEdit waited 8 s four times and the agent
   kept reading Finder. When the window list and NSWorkspace disagree and NSWorkspace's active app has no on-screen
   window, that app is now taken as frontmost.
+- Seen live (the TextEdit retry): done in 4 steps, 5.9 s, a 119-character poem in an untitled document. But the
+  first read found macOS's "Accessibility Access" prompt in front (com.apple.accessibility.universalAccessAuthWarn)
+  and Jev clicked "Deny" at confidence 0.36 as a routine click. The safety policy now denies every action inside
+  macOS permission and password prompts except OPEN_APP to leave them: granting or refusing access is the person's.
 - To check live: Chrome's pictures report their address (AXURL). If `jevosx observe` on a Google Images page shows
   no `image` elements, that is the first thing to fix.
 

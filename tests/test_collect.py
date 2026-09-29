@@ -7,6 +7,7 @@ from jevosx.collect import (
     link_key,
     price_summary,
     price_value,
+    read_card,
     result_shape,
     save_photos,
     split_price,
@@ -134,6 +135,27 @@ def test_shapes_prices_and_summary():
     feed = Feed([("a", "€1"), ("b", "€10"), ("c", "€30"), ("d", "Free"), ("e", "€50")])
     items = collector(feed).run().items
     assert price_summary(items) == {"priced": 3, "min": 10.0, "median": 30.0, "max": 50.0}
+
+
+def test_cards_read_as_comma_separated_fields():
+    """Seen live: Chrome reads a card as "title, €price, town, listing N". The old pattern kept "€20," with its comma,
+    left the town and listing number in the title, and read "TEL 79712979, €225" as a €79,712,979 price."""
+    assert read_card("Drill Driver, €20, Marsaskala, listing 1585585379728707") == ("Drill Driver", "€20", "Marsaskala")
+    assert read_card("CORDLESS SET NEW BOXED TEL 79712979, €225, reduced from €300, Mtarfa, Malta, listing 17") == (
+        "CORDLESS SET NEW BOXED TEL 79712979",
+        "€225",
+        "reduced from €300, Mtarfa, Malta",
+    )
+    assert read_card("Impact drill for only €25 call 79951266, €25, Santa Venera, listing 22") == (
+        "Impact drill for only €25 call 79951266",
+        "€25",
+        "Santa Venera",
+    )
+    assert read_card("Deca welder, €1,250, Fgura, listing 9") == ("Deca welder", "€1,250", "Fgura")
+    assert read_card("Pillar drill, Free, Zabbar, Malta, listing 24") == ("Pillar drill", "Free", "Zabbar, Malta")
+    assert read_card("€1,250 · Deca welder · Fgura") == ("Deca welder · Fgura", "€1,250", "")  # no fields: as before
+    assert split_price("RONIX 2603, €240") == ("€240", "RONIX 2603,")  # a model number before a price is not a price
+    assert price_value(read_card("Drill, €20, Mosta, listing 1")[1]) == 20.0
 
 
 def test_saves_photos(tmp_path):

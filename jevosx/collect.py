@@ -39,10 +39,9 @@ DEFAULT_PATIENCE = 5
 SETTLE_S = 1.2  # after each scroll, before reading; longer after a scroll that brought nothing
 RELEVANCE_WINDOW = 20  # --query: judged on the latest this many results
 MIN_RELEVANCE = 0.25  # --query: stop when fewer than this share of them mention the query
-_PRICE = re.compile(
-    r"(?:[€$£]\s?\d[\d.,]*|\d[\d.,]*\s?(?:€|EUR|eur)\b|\bfree\b)",
-    re.IGNORECASE,
-)
+_NUMBER = r"\d(?:[\d.,]*\d)?"  # ends in a digit: "€20, Mosta" is €20, not "€20,"
+_PRICE = re.compile(rf"(?:[€$£]\s?{_NUMBER}|{_NUMBER}\s?(?:€|EUR)(?!\w)|\bfree\b)", re.IGNORECASE)
+_LISTING_TAIL = re.compile(r",\s*listing\s+\d+\s*$", re.IGNORECASE)
 _DIGITS = re.compile(r"\d+")
 
 
@@ -61,6 +60,7 @@ class Item:
     text: str
     title: str
     price: str | None = None
+    place: str = ""
     photo_url: str | None = None
     photo: str | None = None  # file name, when photos are saved
 
@@ -115,6 +115,19 @@ def result_shape(elements: Sequence[UIElement], minimum: int = 3) -> str | None:
         if count >= minimum and "{n}" in shape:
             return shape
     return None
+
+
+def read_card(text: str) -> tuple[str, str | None, str]:
+    """ "Drill set, €70, reduced from €90, Mosta, Malta, listing 11098" → ("Drill set", "€70", "reduced from €90, Mosta,
+    Malta"). Seen live: Chrome reads a Marketplace card as comma-separated fields, and titles carry their own prices
+    and phone numbers ("… for only €25 call 7995…"), so the price is the last field that is nothing but a price."""
+    body = _LISTING_TAIL.sub("", text).strip()
+    fields = body.split(", ")
+    for n in range(len(fields) - 1, 0, -1):
+        if _PRICE.fullmatch(fields[n].strip()):
+            return ", ".join(fields[:n]).strip(), fields[n].strip(), ", ".join(fields[n + 1 :]).strip()
+    price, rest = split_price(body)
+    return rest, price, ""
 
 
 def split_price(text: str) -> tuple[str | None, str]:
@@ -242,8 +255,8 @@ class Collector:
                 if item.photo_url is None:  # the picture may load after the card
                     item.photo_url = photo_for(element, obs.elements)
                 continue
-            price, title = split_price(element.label)
-            item = Item(key, element.url or "", element.label, title, price, photo_for(element, obs.elements))
+            title, price, place = read_card(element.label)
+            item = Item(key, element.url or "", element.label, title, price, place, photo_for(element, obs.elements))
             seen[key] = item
             result.items.append(item)
             added += 1

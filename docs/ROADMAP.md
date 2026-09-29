@@ -362,6 +362,11 @@ of 24 cards; a cap of 80 cut drills and grinders short; and far down, results st
   the search became "mitre sawcordless drill", and the read-back passed because the new text was in the field.
   Typing now checks that the old value is gone: if the typed text sits next to it, the executor selects all, deletes
   and types once more, and reports a failure if the old text still survives (`kept_old_text`).
+- Seen live (29 Sep, first `collect` run, "cordless drill": 160 cards in 51 s): Chrome reads a card as "title,
+  €price, town, listing N", not "€price · title". Prices kept their comma ("€20,"), titles kept the town and listing
+  number, and "NEW BOXED TEL 79712979, €225" became a €79,712,979 price. Cards are now read as fields (`read_card`):
+  the price is the last field that is only a price, the title comes before it and the place after it, and a number
+  must end in a digit. All 160 live cards then had a price and a place.
 
 ## Next research (not built yet)
 

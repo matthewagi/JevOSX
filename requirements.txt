@@ -1,0 +1,18 @@
+# Runtime dependencies. The pyobjc bridges only install on macOS; everything else is cross-platform
+# so the router, memory layer and tests also run on Linux CI.
+httpx[http2]>=0.27,<1
+numpy>=1.26
+
+# macOS Accessibility (AXUIElement), CoreGraphics events (CGEvent) and AppKit (NSWorkspace)
+pyobjc-core>=10.3; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.3; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.3; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.3; sys_platform == "darwin"
+# On-device OCR for apps that draw their own interface (games, canvas design tools)
+pyobjc-framework-Vision>=10.3; sys_platform == "darwin"
+
+# Saved website logins live in the macOS Keychain (`jevosx login add github.com`)
+keyring>=25; sys_platform == "darwin"
+
+# Claude in the console (`jevosx ui`, Claude mode): talks it through with you and hands steps to Jev
+anthropic>=1.9,<2

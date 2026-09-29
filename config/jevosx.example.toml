@@ -1,0 +1,129 @@
+# JevOSX configuration. Copy to ./jevosx.toml or ~/.config/jevosx/config.toml and edit.
+# Every key is optional; the values below are the defaults. Unknown keys are rejected (typos fail loudly).
+# Secrets never go here: put TYPESAFE_API_KEY (and optionally TEXT_MODEL_API_KEY) in the environment or .env.
+
+[jev]
+api_key_env = "TYPESAFE_API_KEY"
+endpoint = "https://api.typesafe.ai/v1/systemone"
+model = "jev-latest"              # pin a version (e.g. "jev-1.13.0") for reproducible runs
+timeout_s = 10.0
+max_retries = 2                    # transient 429/5xx/529 only; decisions have no side effects
+http2 = true
+max_choices = 200                  # per choice question (Jev accepts up to 255)
+# Context guardrails
+max_state_bytes = 48000            # serialized state cap: text is trimmed first, then trailing elements
+include_disabled = false           # send disabled / non-interactive elements too
+offer_installed_apps = "mentioned" # mentioned | all | none: which non-running apps OPEN_APP may offer
+
+[observer]
+max_nodes = 3000                   # AX nodes visited per observation
+max_elements = 180                 # indexed elements per observation
+max_depth = 64
+max_children = 400
+time_budget_s = 1.5
+max_text_chars = 2000              # visible static text sent as context
+probe_generic = true               # index labelled AXGroup/AXImage/AXCell only if they expose AXPress
+include_menus = true               # menu-bar commands as MENU targets
+max_menu_items = 200
+menu_cache_ttl_s = 3.0
+include_installed_apps = true
+app_dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", "~/Applications"]
+messaging_timeout_s = 0.5          # per-AX-call timeout so a hung app cannot stall the agent
+enable_web_accessibility = true    # AXManualAccessibility (Electron) / AXEnhancedUserInterface (Chromium)
+# Apps that draw their own interface (games, canvas design tools): capture the focused window and read its text
+# with Apple's on-device OCR when Accessibility sees almost nothing. Needs the Screen Recording permission.
+vision = "auto"                    # auto | always | off
+vision_min_controls = 4            # auto: fewer interactive elements than this, and hardly any text
+vision_max_items = 60
+vision_min_confidence = 0.35
+
+[executor]
+typing_mode = "auto"               # auto | ax (AXValue writes) | keys (Unicode keystrokes)
+pointer_fallback = false           # last resort: click the element's own AX frame centre
+settle_timeout_s = 0.8
+settle_poll_s = 0.05
+wait_s = 0.6
+launch_timeout_s = 8.0
+key_delay_s = 0.006
+scroll_page_fraction = 0.8
+focus_timeout_s = 1.5              # wait this long for the work window to come forward before keys are sent
+
+[memory]
+enabled = true
+path = "~/.jevosx/memory.db"
+dim = 512                          # changing this requires a new database
+max_hints = 4
+top_episodes = 8
+min_goal_similarity = 0.3
+min_state_similarity = 0.35
+store_typed_text = false
+keep_episodes = 5000
+
+[safety]
+confirm_patterns = ['\bdelete\b', '\bsend\b', '\berase\b', '\btrash\b', '\bdiscard\b', '\bempty\b', '\buninstall\b', '\bshut ?down\b', '\brestart\b', '\blog ?out\b', '\bsign ?out\b', '\bpurchase\b', '\bbuy\b', '\bpay\b', '\bplace order\b', '\btransfer\b', '\bfactory reset\b', '\bformat\b', '\bpublish\b', '\bpost\b', '\bsubmit\b']
+deny_apps = ["com.apple.keychainaccess", "com.apple.Passwords"]
+confirm_keys = ["CMD_Q"]
+deny_keys = []
+confirm_all = false
+confirm_credentials = true         # ask before typing a saved password
+
+[agent]
+max_steps = 40
+min_confidence = 0.65              # steps with consequences (Publish, Send, Pay, Delete, quit): these also ask you
+routine_confidence = 0.3           # clicks on buttons and links, Return, menu commands, DONE
+safe_confidence = 0.2              # easily undone: new window or tab, switch apps, scroll, type into a field
+low_confidence_policy = "retry"    # retry (re-observe) | ask (human approves) | stop
+console_low_confidence_policy = "ask"  # the web console's default: you approve unsure steps instead of re-asking
+max_low_confidence_retries = 2
+ask_after_retries = 1              # with ask: look again this many times before asking you
+gate_console_navigation = false    # true: also gate new-window/app-switch moves away from the web console
+fallback_log = "~/.jevosx/fallbacks.jsonl"
+max_stale_retries = 3
+stuck_after = 3                    # consecutive actions with no visible change → blocked
+history_size = 8
+max_done_rejections = 2
+max_handoffs = 3                   # ASK_USER: hand control to you for 2FA codes, CAPTCHAs, passkeys…
+plan = "auto"                      # auto: the writer's model reads the request once: steps + values to type | off
+ask_first = true                   # ask you up front for what only you know (photos, condition…), max 3 questions
+background = true                  # work behind your window: keys borrow the work window briefly, then yours returns
+
+[writer]
+# Who composes free-form text for goals like "write a poem about autumn" (Jev chooses the field, never the words).
+# auto: the [text_model] below if configured, otherwise Apple's on-device model (macOS 26+, Apple Intelligence on;
+# free, private, offline; JevOSX compiles a small Swift helper into helper_dir on first use).
+backend = "auto"                   # auto | apple | openai | off
+offer = "auto"                     # auto: only when the goal asks for new text | always
+temperature = 0.7
+max_tokens = 800
+timeout_s = 60.0
+helper_dir = "~/.jevosx/bin"
+
+[logins]
+# Saved website logins: `jevosx login add github.com` puts the password in the macOS Keychain.
+# A login is only offered on its own site over https, and the password only goes into password fields.
+enabled = true
+index_path = "~/.jevosx/logins.json"  # hosts and usernames only, never passwords
+
+[text_model]
+# Optional OpenAI-compatible model, used as the writer when configured (see [writer]).
+# Disabled while `model` is empty. Jev itself never generates text.
+api_key_env = "TEXT_MODEL_API_KEY"
+base_url = "https://openrouter.ai/api/v1"
+model = ""
+timeout_s = 15.0
+
+[pilot]
+# Claude in the console: switch the composer to "Claude" and talk or type. Claude plans, asks what is missing,
+# hands concrete steps to Jev and checks the screen. Needs ANTHROPIC_API_KEY (for example in ~/JevOSX/.env).
+enabled = true
+model = "claude-opus-5-5"
+effort = "medium"                  # low | medium | high | xhigh | max
+web_search = true                  # may look up what a site or task needs (billed per search)
+max_tool_calls = 20                # per message you send
+max_tokens = 16000
+
+[keys]
+disabled = []                      # e.g. ["CMD_Q", "CMD_W"]
+
+[keys.custom]
+# SEND_MAIL = "cmd+shift+d"

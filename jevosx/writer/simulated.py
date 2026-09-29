@@ -1,0 +1,75 @@
+"""Demo-mode writer: deterministic canned text so the console can show "write a poem" without any model."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from typing import Any
+
+# The demo's stand-in for the model's judgement of an item's category.
+_CATEGORIES = (
+    ("Tools", r"gun|drill|saw|welder|welding|hammer|wrench|sander|grinder|tool"),
+    ("Furniture", r"chair|table|sofa|desk|bed|shelf|wardrobe"),
+    ("Electronics", r"phone|laptop|tv|camera|console|headphones|speaker"),
+)
+_ABOUT = re.compile(r"\babout\s+(?P<topic>.+?)(?=\s+(?:in|on|into|to|and|then|using|with)\b|[,.;!?\"“]|$)", re.I)
+
+
+def _topic(goal: str) -> str:
+    match = _ABOUT.search(goal)
+    return match.group("topic").strip() if match else "a quiet afternoon"
+
+
+class SimulatedWriter:
+    model = "writer-demo (simulated)"
+
+    def write(self, context: Mapping[str, Any]) -> str:
+        goal = str(context.get("goal", ""))
+        topic = _topic(goal)
+        if re.search(r"\bhaiku\b", goal, re.I):
+            return f"{topic.capitalize()} arrives,\nsoft light across the keyboard,\nthe cursor blinks on"
+        if re.search(r"\b(poem|poetry|sonnet|verse)\b", goal, re.I):
+            return (
+                f"A poem about {topic}\n\n"
+                f"Slow light falls on {topic},\n"
+                "the window hums a patient tune,\n"
+                "and every line I meant to write\n"
+                "arrives as softly as the moon."
+            )
+        if re.search(r"\b(reply|email|message|letter)\b", goal, re.I):
+            return f"Hi,\n\nThanks for your note about {topic}. I'll take a look and get back to you today.\n\nBest,"
+        return f"Notes on {topic}: a short draft written by the simulated writer."
+
+    def generate(
+        self,
+        instructions: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        timeout_s: float | None = None,
+    ) -> str:
+        """Stands in for the goal reader: numbered steps, then the values the pattern rules find (plus a description
+        when the request asks for new text), in the same format the real model is asked for."""
+        from ..router.text import listing_description, slots_from_goal
+
+        request = next((line[9:] for line in prompt.splitlines() if line.startswith("Request: ")), prompt)
+        parts = [p.strip() for p in re.split(r",\s*|\s+(?:and then|then|and)\s+", request) if p.strip()]
+        lines = ["STEPS:", *(f"{i}. {part[0].upper()}{part[1:]}" for i, part in enumerate(parts, start=1)), "VALUES:"]
+        slots = slots_from_goal(request)
+        values = {"website" if name.startswith("url") else name: value for name, value in slots.items()}
+        if re.search(r"\b(generic|some|short)\s+text\b|\bdescription\b", request, re.I) and "title" in values:
+            values["description"] = listing_description(values["title"])
+        if "title" in values and re.search(r"\b(?:sell|selling|listing)\b", request, re.I):
+            title = values["title"].lower()
+            values["category"] = next((c for c, words in _CATEGORIES if re.search(words, title)), "Miscellaneous")
+        lines += [f"{name}: {value}" for name, value in values.items()] or ["none"]
+        lines.append("ASK:")
+        if "category" in values:  # selling: only the person knows what state the item is in
+            lines.append("condition: What condition is it in (new, used like new, used good, used fair)?")
+        else:
+            lines.append("none")
+        return "\n".join(lines)
+
+    def close(self) -> None:
+        return None

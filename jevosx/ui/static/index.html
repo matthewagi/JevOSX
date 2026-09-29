@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JevOSX Console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root {
+  --bg: #0a0c11; --bg-2: #0e1118; --panel: #12161f; --panel-2: #171c27; --panel-3: #1d2330;
+  --border: #242b3a; --border-2: #2e3647; --text: #e8eaf0; --muted: #8e97ab; --faint: #5d667a;
+  --accent: #7c8cff; --accent-2: #3fd0c9; --ok: #3ecf8e; --warn: #f5b84b; --err: #f2706d;
+  --op-click: #7c8cff; --op-type: #b58cff; --op-menu: #3fd0c9; --op-key: #f5b84b; --op-app: #3ecf8e;
+  --op-scroll: #8e97ab; --op-wait: #8e97ab; --op-done: #3ecf8e; --op-blocked: #f2706d;
+  --shadow: 0 10px 30px rgba(0,0,0,.35); --radius: 14px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f4f6fb; --bg-2: #eef1f7; --panel: #ffffff; --panel-2: #f7f8fc; --panel-3: #eef1f7;
+  --border: #e3e7ef; --border-2: #d5dbe7; --text: #151923; --muted: #5b6477; --faint: #8f98aa;
+  --accent: #5566f5; --accent-2: #13a8a0; --ok: #16a86c; --warn: #c98708; --err: #d6423f;
+  --op-click: #5566f5; --op-type: #8a55f0; --op-menu: #13a8a0; --op-key: #c98708; --op-app: #16a86c;
+  --shadow: 0 10px 30px rgba(20,30,60,.08); color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: radial-gradient(1200px 600px at 10% -10%, rgba(124,140,255,.10), transparent 60%),
+       radial-gradient(900px 500px at 110% 10%, rgba(63,208,201,.08), transparent 60%), var(--bg);
+       color: var(--text); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.hidden { display: none !important; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+
+/* ---------- top bar ---------- */
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+          background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(14px);
+          border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .2px; font-size: 16px; }
+.brand svg { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 4px 14px rgba(124,140,255,.35); }
+.brand small { font-weight: 500; color: var(--muted); font-size: 12px; }
+.mode { font-size: 11px; font-weight: 700; letter-spacing: .6px; padding: 3px 8px; border-radius: 999px; }
+.mode.demo { background: rgba(245,184,75,.14); color: var(--warn); border: 1px solid rgba(245,184,75,.35); }
+.mode.live { background: rgba(62,207,142,.12); color: var(--ok); border: 1px solid rgba(62,207,142,.35); }
+.checks { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+        background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.pill.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.pill.bad .dot { background: var(--err); box-shadow: 0 0 8px var(--err); }
+.iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 9px;
+           background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+.iconbtn:hover { color: var(--text); border-color: var(--border-2); }
+.iconbtn svg { width: 16px; height: 16px; }
+.iconbtn.active { color: var(--accent); border-color: var(--accent); }
+.iconbtn.listening { color: #fff; background: var(--bad, #e5484d); border-color: transparent; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .iconbtn.listening { animation: none; } }
+
+/* ---------- layout ---------- */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 18px; padding: 18px 20px 0;
+          height: calc(100vh - 57px); }
+.console { display: flex; flex-direction: column; min-height: 0; }
+.feed { flex: 1; overflow-y: auto; padding: 4px 4px 18px; scroll-behavior: smooth; }
+.side { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border);
+        border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 18px; overflow: hidden; }
+
+/* ---------- welcome ---------- */
+.welcome { max-width: 760px; margin: 5vh auto 0; text-align: center; padding: 0 12px; }
+.welcome h1 { font-size: 34px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.5px;
+              background: linear-gradient(120deg, var(--text), var(--accent) 55%, var(--accent-2));
+              -webkit-background-clip: text; background-clip: text; color: transparent; }
+.welcome p { color: var(--muted); margin: 0 auto 22px; max-width: 620px; }
+.examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; text-align: left; }
+.example { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+           transition: border-color .15s, transform .15s; }
+.example:hover { border-color: var(--accent); transform: translateY(-1px); }
+.example b { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.pipeline { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 26px 0 0; color: var(--faint);
+            font-size: 12px; }
+.pipeline span { padding: 4px 10px; border: 1px dashed var(--border-2); border-radius: 999px; }
+
+/* ---------- conversation ---------- */
+.claude { display: flex; margin: 12px 0 10px; gap: 10px; align-items: flex-start; }
+.claude .avatar { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 700;
+                  font-size: 13px; color: #fff; background: #d97757; }
+.claude .body { max-width: 82%; display: grid; gap: 6px; }
+.claude .bubble { background: var(--panel); border: 1px solid var(--border); padding: 10px 14px; border-radius: 4px 16px 16px 16px;
+                  white-space: pre-wrap; line-height: 1.5; box-shadow: var(--shadow); }
+.claude .bubble:empty::after { content: "…"; color: var(--muted); }
+.claude.error .bubble { border-color: var(--bad, #e5484d); color: var(--bad, #e5484d); }
+.tool-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 3px 10px;
+             border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); width: fit-content; }
+.tool-chip.done { color: var(--text); } .tool-chip.failed { color: var(--bad, #e5484d); }
+.handoff-line { margin: 12px 0 6px 36px; font-size: 12.5px; color: var(--muted); }
+.handoff-line b { color: var(--text); font-weight: 600; }
+.seg.who { min-width: 116px; }
+.you { display: flex; justify-content: flex-end; margin: 18px 0 8px; }
+.you .bubble { max-width: 78%; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--accent-2)));
+               color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: var(--shadow); }
+.you .opts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border);
+       color: var(--muted); }
+.run { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+       margin: 0 0 8px; overflow: hidden; }
+.run > header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border);
+                background: var(--panel-2); }
+.run > header .who { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.run > header .who svg { width: 20px; height: 20px; border-radius: 6px; }
+.run > header .spacer { flex: 1; }
+.status { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+          display: inline-flex; align-items: center; gap: 6px; }
+.status.running { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.status.success, .status.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.status.blocked, .status.failed, .status.error, .status.aborted { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+.status.low_confidence, .status.max_steps { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent;
+           animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.steps { list-style: none; margin: 0; padding: 6px 0; }
+.step { display: grid; grid-template-columns: 30px 1fr auto; gap: 4px 12px; padding: 10px 16px; position: relative;
+        animation: rise .25s ease both; }
+.step + .step { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.num { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700;
+       background: var(--panel-3); color: var(--muted); border: 1px solid var(--border); margin-top: 1px; }
+.line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.op { font: 700 11px/1 var(--mono); letter-spacing: .4px; padding: 5px 8px; border-radius: 6px; color: #fff;
+      background: var(--op, var(--accent)); }
+.target { font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+.outcome { font-size: 12px; color: var(--muted); }
+.outcome.bad { color: var(--err); } .outcome.warn { color: var(--warn); } .outcome.good { color: var(--ok); }
+.meta { grid-column: 2 / 4; display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--faint); }
+.meta b { color: var(--muted); font-weight: 600; }
+.conf { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.meter { position: relative; width: 92px; height: 6px; border-radius: 99px; background: var(--panel-3); overflow: visible; }
+.meter i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--ok); }
+.meter.low i { background: var(--err); } .meter.mid i { background: var(--warn); }
+.meter .floor { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: .55; border-radius: 2px; }
+.conf > span { font: 600 12px var(--mono); min-width: 34px; text-align: right; }
+details.more { grid-column: 2 / 4; }
+details.more summary { cursor: pointer; font-size: 11.5px; color: var(--faint); list-style: none; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary:hover { color: var(--muted); }
+.alts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 8px; }
+.alt { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+.alt h4 { margin: 0 0 6px; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .6px; }
+.bar { display: grid; grid-template-columns: 1fr 46px; gap: 8px; align-items: center; margin: 3px 0; }
+.bar div { height: 5px; border-radius: 9px; background: var(--panel-3); position: relative; overflow: hidden; }
+.bar div i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 9px; }
+.bar label { display: flex; justify-content: space-between; grid-column: 1 / 3; font-family: var(--mono); font-size: 11.5px; }
+.hint { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--accent-2); }
+.hint svg { width: 13px; height: 13px; }
+.approval { margin: 8px 16px 12px; border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+            background: color-mix(in srgb, var(--warn) 9%, var(--panel)); border-radius: 12px; padding: 12px 14px; }
+.approval h4 { margin: 0 0 4px; font-size: 13px; color: var(--warn); display: flex; align-items: center; gap: 6px; }
+.approval .act { font-family: var(--mono); font-size: 12.5px; margin: 6px 0; }
+.approval .row { display: flex; gap: 8px; margin-top: 10px; }
+.approval.resolved { opacity: .7; padding: 8px 14px; }
+.approval.resolved .row { margin-top: 4px; }
+.approval-item { list-style: none; }
+.approval .q { display: grid; gap: 4px; margin: 8px 0; font-size: 13px; }
+.approval input.answer { width: 100%; border: 1px solid var(--border-2); background: var(--panel); border-radius: 8px;
+                         padding: 7px 10px; margin-top: 6px; }
+.approval input.answer:focus { outline: none; border-color: var(--accent); }
+.approval.resolved input.answer { opacity: .8; }
+.btn { border: 1px solid var(--border-2); background: var(--panel-2); border-radius: 10px; padding: 7px 14px; font-weight: 600; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+               border: 0; color: #fff; box-shadow: 0 6px 18px rgba(124,140,255,.35); }
+.btn.danger { background: color-mix(in srgb, var(--err) 14%, var(--panel)); border-color: color-mix(in srgb, var(--err) 50%, transparent); color: var(--err); }
+.btn.ok { background: color-mix(in srgb, var(--ok) 14%, var(--panel)); border-color: color-mix(in srgb, var(--ok) 50%, transparent); color: var(--ok); }
+.btn:disabled { opacity: .5; cursor: default; }
+.run > footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--border);
+                background: var(--panel-2); font-size: 12.5px; color: var(--muted); }
+.run > footer .spacer { flex: 1; }
+.run .note { padding: 8px 16px; font-size: 12.5px; color: var(--err); }
+
+/* ---------- composer ---------- */
+.composer { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+            box-shadow: var(--shadow); padding: 10px; margin: 6px 0 18px; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.inputrow { display: flex; gap: 10px; align-items: flex-end; }
+#goal { flex: 1; resize: none; border: 0; outline: 0; background: transparent; padding: 8px 8px; min-height: 42px;
+        max-height: 180px; font-size: 15px; }
+#goal::placeholder { color: var(--faint); }
+.actions { display: flex; gap: 8px; align-items: center; }
+.kbd { font: 11px var(--mono); color: var(--faint); border: 1px solid var(--border); border-bottom-width: 2px;
+       border-radius: 5px; padding: 1px 5px; }
+.options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 12px 8px 4px;
+           border-top: 1px solid var(--border); margin-top: 8px; }
+.field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+.field input[type=text], .field input[type=number], .field textarea, .field select {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px; outline: 0; }
+.field input:focus, .field textarea:focus { border-color: var(--accent); }
+.field.wide { grid-column: span 2; }
+.seg { display: flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 5px 6px; border-radius: 7px; color: var(--muted); font-size: 12px; }
+.seg button.on { background: var(--panel-3); color: var(--text); box-shadow: 0 1px 0 var(--border-2); }
+.switch { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; user-select: none; }
+.switch input { appearance: none; width: 34px; height: 20px; border-radius: 99px; background: var(--panel-3);
+                border: 1px solid var(--border-2); position: relative; transition: background .15s; cursor: pointer; margin: 0; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+                       background: #fff; transition: transform .15s; }
+.switch input:checked { background: var(--accent); border-color: var(--accent); }
+.switch input:checked::after { transform: translateX(14px); }
+input[type=range] { accent-color: var(--accent); width: 100%; }
+
+/* ---------- side panel ---------- */
+.tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.tabs button { flex: 1; border: 0; background: transparent; padding: 7px; border-radius: 8px; color: var(--muted); font-weight: 600; font-size: 13px; }
+.tabs button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 0 var(--border-2), 0 0 0 1px var(--border); }
+.tab { flex: 1; overflow-y: auto; padding: 14px; }
+.card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+.appline { display: flex; align-items: center; gap: 10px; }
+.appicon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; color: #fff;
+           background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.appline .name { font-weight: 700; }
+.appline .sub { font-size: 12px; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px; }
+.stat b { display: block; font-size: 16px; } .stat span { font-size: 11px; color: var(--faint); }
+.search { width: 100%; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; outline: 0; margin-bottom: 8px; }
+.el { display: grid; grid-template-columns: 34px 1fr; gap: 2px 8px; padding: 7px 4px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.el .idx { font: 700 11px var(--mono); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+           border-radius: 6px; text-align: center; padding: 3px 0; height: fit-content; }
+.el .lbl { font-size: 13px; overflow-wrap: anywhere; }
+.el .lbl em { font-style: normal; color: var(--faint); font-size: 11.5px; margin-right: 6px; }
+.el .sub { grid-column: 2; display: flex; gap: 5px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.chip { font: 600 10px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border-2); color: var(--muted); }
+.chip.st { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--faint); margin: 14px 0 6px; font-weight: 700; }
+.ep { display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 2px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ep .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.ep .dot.success, .ep .dot.done { background: var(--ok); } .ep .dot.failed, .ep .dot.blocked, .ep .dot.error { background: var(--err); }
+.ep .dot.low_confidence, .ep .dot.max_steps { background: var(--warn); }
+.ep .goal { font-size: 13px; overflow-wrap: anywhere; } .ep .when { grid-column: 2; font-size: 11px; color: var(--faint); }
+.ep .lab { grid-row: 1 / 3; grid-column: 3; display: flex; gap: 4px; }
+.ep .lab button { border: 1px solid var(--border); background: var(--panel); border-radius: 7px; width: 28px; height: 26px; color: var(--muted); }
+.ep .lab button:hover { color: var(--text); border-color: var(--border-2); }
+.log { font: 11.5px/1.5 var(--mono); }
+.log div { padding: 3px 0; border-bottom: 1px dashed color-mix(in srgb, var(--border) 60%, transparent); overflow-wrap: anywhere; }
+.log .k { color: var(--accent); } .log .w { color: var(--warn); } .log .e { color: var(--err); } .log .t { color: var(--faint); }
+.empty { color: var(--faint); text-align: center; padding: 30px 10px; font-size: 13px; }
+.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel-3); border: 1px solid var(--border-2);
+         padding: 10px 16px; border-radius: 12px; box-shadow: var(--shadow); font-size: 13px; z-index: 50; }
+
+@media (max-width: 1080px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .feed { min-height: 50vh; }
+  .composer { position: sticky; bottom: 8px; z-index: 5; }
+  .side { min-height: 480px; }
+  .options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .checks { display: none; }
+}
+@media (max-width: 560px) {
+  .layout { padding: 12px 12px 0; }
+  .topbar { padding: 10px 12px; }
+  .options { grid-template-columns: 1fr; } .field.wide { grid-column: auto; }
+  .welcome h1 { font-size: 26px; }
+  .step { grid-template-columns: 26px 1fr; } .conf { grid-column: 2; justify-self: start; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c8cff"/><stop offset="1" stop-color="#3fd0c9"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><path d="M38 16v22a10 10 0 0 1-17.3 6.8" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><circle cx="38" cy="16" r="3.2" fill="#fff"/></svg>
+    <span>JevOSX <small>console</small></span>
+    <span id="mode" class="mode"></span>
+  </div>
+  <div id="checks" class="checks"></div>
+  <button id="voice" class="iconbtn" title="Voice: JevOSX speaks its questions and results, and listens for your answers" aria-label="Voice" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+  </button>
+  <button id="theme" class="iconbtn" title="Toggle theme" aria-label="Toggle theme">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+  </button>
+</header>
+
+<main class="layout">
+  <section class="console">
+    <div id="feed" class="feed" aria-live="polite">
+      <div id="welcome" class="welcome">
+        <h1>Tell your Mac what to do.</h1>
+        <p id="welcome-text">Every step reads the app's accessibility tree, asks Jev to pick one action from a fixed menu,
+          and only executes it when Jev is confident enough. Risky steps wait for your approval.</p>
+        <div id="examples" class="examples"></div>
+        <div class="pipeline"><span>observe</span><span>recall</span><span>decide</span><span>confidence gate</span><span>guard</span><span>act</span><span>learn</span></div>
+      </div>
+    </div>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <div class="inputrow">
+        <textarea id="goal" rows="1" placeholder='Tell your Mac what to do… e.g. In Safari, search for "accessibility API"'></textarea>
+        <div class="actions">
+          <div class="seg who" id="who" title="Jev: run a command directly. Claude: talk it through; Claude hands the steps to JevOSX.">
+            <button type="button" data-v="jev">Jev</button><button type="button" data-v="claude">Claude</button>
+          </div>
+          <button type="button" id="new-chat" class="iconbtn hidden" title="New conversation with Claude" aria-label="New conversation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/></svg>
+          </button>
+          <button type="button" id="mic" class="iconbtn" title="Speak your command" aria-label="Speak your command">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <button type="button" id="toggle-options" class="iconbtn" title="Options" aria-label="Options">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          </button>
+          <button type="submit" id="send" class="btn primary">Run</button>
+          <button type="button" id="stop" class="btn danger hidden">Stop</button>
+        </div>
+      </div>
+      <div id="options" class="options hidden">
+        <label class="field">Start in app<input type="text" id="opt-app" placeholder="e.g. TextEdit"></label>
+        <label class="field">Only accept DONE if visible<input type="text" id="opt-expect" placeholder="text that proves success"></label>
+        <label class="field">Max steps<input type="number" id="opt-steps" min="1" max="200" placeholder="default"></label>
+        <div class="field" title="For consequential steps. Easily undone steps (new window, typing an address) need less, clicks a little less; never more than this.">Confidence floor <span id="opt-floor-v" class="mono"></span><input type="range" id="opt-floor" min="0" max="1" step="0.05"></div>
+        <div class="field">When Jev is unsure
+          <div class="seg" id="opt-policy"><button type="button" data-v="retry">Retry</button><button type="button" data-v="ask">Ask me</button><button type="button" data-v="stop">Stop</button></div>
+        </div>
+        <div class="field">Execution<label class="switch"><input type="checkbox" id="opt-dry"> Dry run (decide only)</label></div>
+        <div class="field">Learning<label class="switch"><input type="checkbox" id="opt-memory" checked> Use memory</label></div>
+        <label class="field">Text slots <span class="muted">(name=value per line)</span><textarea id="opt-slots" rows="2" placeholder="email=me@example.com"></textarea></label>
+      </div>
+    </form>
+  </section>
+
+  <aside class="side">
+    <nav class="tabs" role="tablist">
+      <button class="on" data-tab="screen" role="tab">Screen</button>
+      <button data-tab="memory" role="tab">Memory</button>
+      <button data-tab="log" role="tab">Log</button>
+    </nav>
+    <div id="tab-screen" class="tab"></div>
+    <div id="tab-memory" class="tab hidden"></div>
+    <div id="tab-log" class="tab hidden"><div id="log" class="log"></div></div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const BOOT = /*__JEVOSX_BOOT__*/{};
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const OP_COLOR = { CLICK: "--op-click", TYPE_TEXT: "--op-type", MENU: "--op-menu", PRESS_KEY: "--op-key",
+  OPEN_APP: "--op-app", FOCUS_WINDOW: "--op-app", SCROLL_UP: "--op-scroll", SCROLL_DOWN: "--op-scroll",
+  WAIT: "--op-wait", DONE: "--op-done", BLOCKED: "--op-blocked", ASK_USER: "--warn", PLAN: "--accent-2", ASK: "--warn" };
+const STATUS_TEXT = { acted: "executed", wait: "waited", done: "goal complete", blocked: "blocked", denied: "refused by safety",
+  declined: "declined", stale: "UI changed, re-observed", low_confidence: "withheld (low confidence)", failed: "failed",
+  handoff: "handed to you", plan: "outline from the on-device model", ask: "asked you first" };
+const RUN_TEXT = { running: "Running", success: "Verified", done: "Done", blocked: "Blocked", low_confidence: "Low confidence",
+  failed: "Failed", max_steps: "Out of steps", aborted: "Stopped", error: "Error" };
+const EXAMPLES = [
+  ["Write a poem", "Open TextEdit and write a short poem about the sea"],
+  ["Log in to a site", "Log in to github.com in Safari"],
+  ["App without controls", "Start a new game of Space Blocks on normal difficulty"],
+  ["Search the web", 'In Safari, search for "accessibility API"'],
+  ["Write and save", 'In TextEdit, write "Shopping list" and save it as "groceries"'],
+  ["Needs approval", 'Delete the "Trip ideas" note in Notes'],
+  ["Browse folders", "Open Downloads in Finder"],
+  ["Sell on Marketplace", "go to facebook and prepare a product to sell on marketplace a plastic welding gun for 40 euros generic text"],
+  ["Confidence gate", "Do something interesting"],
+];
+const state = { runs: new Map(), status: null, floor: 0.65, policy: "retry", running: false, tab: "screen", screenTimer: 0,
+  who: "jev", pilotBusy: false };
+
+/* ---------- helpers ---------- */
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false)
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+function svg(path, size = 14) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("width", size); s.setAttribute("height", size);
+  s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2");
+  s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+  s.innerHTML = path;  // static, trusted icon markup only
+  return s;
+}
+const ICON = {
+  brain: '<path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 5 3 3 0 0 0 3 5 3 3 0 0 0 5 1V5a3 3 0 0 0-3-1z"/><path d="M15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 2 5 3 3 0 0 1-3 5 3 3 0 0 1-5 1"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M12 8v5M12 16h0"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M4 18a9 9 0 1 1 16 0"/>',
+  hand: '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5v-7a1.5 1.5 0 0 1 3 0V12"/><path d="M14 11.5V6.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-.5A5.5 5.5 0 0 1 5 16.5L3.8 13a1.5 1.5 0 0 1 2.7-1.3L8 14"/>',
+  logo: '<rect x="2" y="2" width="20" height="20" rx="6" fill="url(#lg)" stroke="none"/><path d="M14 7v7a3 3 0 0 1-5.2 2" stroke="#fff"/>',
+};
+async function api(path, body) {
+  const opts = { headers: { "X-JevOSX-Token": BOOT.token } };
+  if (body !== undefined) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+function toast(msg) {
+  const t = h("div", { class: "toast" }, msg); document.body.append(t); setTimeout(() => t.remove(), 3200);
+}
+const fmtMs = (v) => (v === undefined || v === null) ? "–" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`;
+const ago = (ts) => { const s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
+function logLine(kind, text, cls = "") {
+  const box = $("#log"); const t = new Date().toLocaleTimeString();
+  box.prepend(h("div", {}, h("span", { class: "t" }, t + " "), h("span", { class: cls || "k" }, kind + " "), text));
+  while (box.childElementCount > 400) box.lastChild.remove();
+}
+
+/* ---------- status bar ---------- */
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status"); state.status = s; voice.serverSpeech = Boolean(s.speech);
+    $("#mode").textContent = s.demo ? "DEMO" : "LIVE"; $("#mode").className = "mode " + (s.demo ? "demo" : "live");
+    const checks = $("#checks"); checks.replaceChildren();
+    for (const c of s.checks) checks.append(h("span", { class: "pill " + (c.ok === true ? "ok" : c.ok === false ? "bad" : ""), title: c.detail }, h("span", { class: "dot" }), c.name));
+    checks.append(h("span", { class: "pill", title: "decision model" }, h("span", { class: "dot" }), s.model));
+    // Claude in the console needs an Anthropic API key; without one the switch stays hidden (use the Claude app
+    // with jevosx mcp instead).
+    const pilotReady = Boolean(s.pilot && s.pilot.available === true);
+    $("#who").classList.toggle("hidden", !pilotReady);
+    if (!pilotReady && state.who === "claude") claude.setWho("jev");
+    if (pilotReady) checks.append(h("span", { class: "pill ok", title: `Claude: ${s.pilot.detail}` }, h("span", { class: "dot" }), "Claude"));
+    if (s.memory.enabled) checks.append(h("span", { class: "pill ok", title: "local trajectory memory" }, h("span", { class: "dot" }),
+      `memory · ${s.memory.episodes ?? 0} runs`));
+    if (s.stale && !state.staleShown) {
+      state.staleShown = true;
+      toast("JevOSX was updated after this console started. Stop it with Ctrl+C in Terminal and run jevosx ui again.");
+      logLine("update", "newer JevOSX code is on disk: restart the console to use it", "w");
+    }
+    if (!state.initialized) {
+      state.initialized = true; state.floor = s.defaults.min_confidence; state.policy = s.defaults.low_confidence_policy;
+      $("#opt-floor").value = state.floor; $("#opt-floor-v").textContent = Number(state.floor).toFixed(2); setPolicy(state.policy);
+      if (s.demo) $("#welcome-text").textContent = "Demo mode: a simulated Mac (Finder, TextEdit, Safari with a sign-in page, Notes, and a game that draws its own interface) and a simulated " +
+        "decision model stand in for the real thing, so you can try the full loop here. Start with `jevosx ui` (no --demo) on your Mac to drive real apps.";
+    }
+  } catch (e) { logLine("status", e.message, "e"); }
+}
+
+/* ---------- conversation rendering ---------- */
+function runCard(run) {
+  let entry = state.runs.get(run.id);
+  if (entry) return entry;
+  hideWelcome();
+  const tags = [];
+  const o = run.options || {};
+  if (o.app) tags.push(`app: ${o.app}`); if (o.dry_run) tags.push("dry run"); if (o.expect_text) tags.push(`expect: ${o.expect_text}`);
+  if (o.min_confidence !== null && o.min_confidence !== undefined) tags.push(`floor ${Number(o.min_confidence).toFixed(2)}`);
+  if (o.low_confidence_policy) tags.push(`unsure → ${o.low_confidence_policy}`);
+  const you = o.origin === "claude"
+    ? h("div", { class: "handoff-line" }, "Claude → JevOSX: ", h("b", {}, run.goal))
+    : h("div", { class: "you" }, h("div", {}, h("div", { class: "bubble" }, run.goal),
+      tags.length ? h("div", { class: "opts" }, tags.map((t) => h("span", { class: "tag" }, t))) : null));
+  const status = h("span", { class: "status running" }, h("span", { class: "spinner" }), "Running");
+  const steps = h("ol", { class: "steps" });
+  const card = h("article", { class: "run" },
+    h("header", {}, h("div", { class: "who" }, svg(ICON.logo, 20), "JevOSX"), h("span", { class: "muted" }, "·"),
+      h("span", { class: "muted subtitle" }, run.options?.dry_run ? "deciding without executing" : "working on it"), h("span", { class: "spacer" }), status),
+    steps);
+  $("#feed").append(you, card);
+  entry = { run, card, steps, status, approvals: new Map(), floor: o.min_confidence ?? state.floor };
+  state.runs.set(run.id, entry);
+  return entry;
+}
+function hideWelcome() { $("#welcome")?.remove(); }
+function scrollFeed() { const f = $("#feed"); if (f.scrollHeight - f.scrollTop - f.clientHeight < 260) f.scrollTop = f.scrollHeight; }
+
+function meter(value, floor, risk) {
+  const v = Math.max(0, Math.min(1, value ?? 0));
+  const cls = v < floor ? "low" : v < floor + 0.1 ? "mid" : "";
+  const kind = risk ? ` for ${risk} steps` : "";
+  return h("div", { class: "conf", title: `gate confidence ${v.toFixed(2)} · floor ${floor.toFixed(2)}${kind}` },
+    h("div", { class: "meter " + cls }, h("i", { style: `width:${v * 100}%` }), h("span", { class: "floor", style: `left:${floor * 100}%` })),
+    h("span", {}, v.toFixed(2)));
+}
+function bars(title, rows) {
+  return h("div", { class: "alt" }, h("h4", {}, title), rows.map(([k, p]) =>
+    h("div", { class: "bar" }, h("label", {}, h("span", {}, k), h("span", {}, (p * 100).toFixed(1) + "%")),
+      h("div", {}, h("i", { style: `width:${p * 100}%` })))));
+}
+function addStep(entry, ev) {
+  const d = ev.decision || {};
+  const op = d.operation || (ev.action || "").split(" ")[0] || "…";
+  const target = d.target || (ev.action || "").slice(op.length).trim();
+  const outcomeCls = ["failed", "denied", "blocked"].includes(ev.status) ? "bad" : ["low_confidence", "declined", "stale", "handoff"].includes(ev.status) ? "warn" : ev.status === "done" ? "good" : "";
+  let outcome = STATUS_TEXT[ev.status] || ev.status;
+  if (ev.result?.method) outcome += ` · ${ev.result.method}`;
+  const meta = h("div", { class: "meta" });
+  const t = ev.timings || {};
+  for (const [k, label] of [["jev_ms", "jev"], ["observe_ms", "observe"], ["recall_ms", "recall"], ["act_ms", "act"], ["settle_ms", "settle"]])
+    if (t[k] !== undefined) meta.append(h("span", {}, h("b", {}, label), " " + fmtMs(t[k])));
+  if (ev.observation?.app) meta.append(h("span", {}, h("b", {}, "in"), ` ${ev.observation.app}${ev.observation.window ? " — " + ev.observation.window : ""}`));
+  if (ev.hints?.length) meta.append(h("span", { class: "hint" }, svg(ICON.brain, 13), `${ev.hints.length} memory hint${ev.hints.length > 1 ? "s" : ""}`));
+  const alts = [];
+  if (d.top_operations?.length) alts.push(bars("operation", d.top_operations));
+  if (d.top_targets?.length) alts.push(bars("target", d.top_targets));
+  if (ev.hints?.length) alts.push(h("div", { class: "alt" }, h("h4", {}, "memory hints"), ev.hints.map((x) =>
+    h("div", {}, `${x.kind} · ${x.operation}${x.target ? " " + x.target : ""} · ${x.past_runs} run(s) · sim ${x.similarity}`))));
+  const details = alts.length || ev.message ? h("details", { class: "more" }, h("summary", {}, "details"),
+    ev.message ? h("div", { class: "outcome", style: "margin-top:6px" }, ev.message) : null, alts.length ? h("div", { class: "alts" }, alts) : null) : null;
+  const retry = entry.lastStep === ev.step && ev.step > 0;  // same step number again: a withheld or re-observed attempt
+  entry.lastStep = ev.step;
+  const li = h("li", { class: "step" },
+    h("span", { class: "num", title: retry ? `step ${ev.step}, another attempt` : `step ${ev.step}` }, retry ? "↻" : String(ev.step)),
+    h("div", { class: "line" }, h("span", { class: "op", style: `--op: var(${OP_COLOR[op] || "--accent"})` }, op),
+      target ? h("span", { class: "target" }, target) : null, h("span", { class: "outcome " + outcomeCls }, "· " + outcome)),
+    d.gate_confidence !== undefined ? meter(d.gate_confidence, d.floor ?? entry.floor, d.risk) : h("span"),
+    meta, details);
+  entry.steps.append(li);
+  scrollFeed();
+}
+function addApproval(entry, a) {
+  const handoff = a.category === "handoff", questions = a.category === "questions";
+  const kindTitle = questions ? "Before I start" : handoff ? "Your turn: Jev needs you"
+    : a.category === "low_confidence" ? "Jev is unsure: approve this step?" : "This step needs your approval";
+  const allow = h("button", { class: "btn ok", type: "button" }, questions ? "Start" : handoff ? "Done, continue" : "Allow");
+  const deny = h("button", { class: "btn danger", type: "button" }, questions || handoff ? "Stop the run" : "Deny");
+  const icon = handoff || questions ? ICON.hand : a.category === "low_confidence" ? ICON.gauge : ICON.shield;
+  const fields = (a.questions || []).map((q) => ({ name: q.name, question: q.question,
+    input: h("input", { type: "text", class: "answer", placeholder: "your answer, or leave it empty" }) }));
+  const typed = handoff ? h("input", { type: "text", class: "answer", placeholder: "…or type the answer here and press Done" }) : null;
+  const body = questions ? fields.map((f) => h("label", { class: "q" }, h("span", {}, f.question), f.input))
+    : [h("div", { class: "act" }, a.action)];
+  const box = h("div", { class: "approval" + (handoff || questions ? " handoff" : "") }, h("h4", {}, svg(icon, 15), kindTitle),
+    ...body, h("div", { class: "muted reason", style: "font-size:12.5px" }, a.reason), typed, h("div", { class: "row" }, allow, deny));
+  const answer = async (ok) => {
+    allow.disabled = deny.disabled = true;
+    const payload = { request_id: a.request_id, allow: ok };
+    if (questions) payload.answers = Object.fromEntries(fields.map((f) => [f.name, f.input.value]));
+    if (typed) payload.answer = typed.value;
+    try { await api("/api/approve", payload); } catch (e) { toast(e.message); allow.disabled = deny.disabled = false; }
+  };
+  allow.onclick = () => answer(true); deny.onclick = () => answer(false);
+  for (const input of [...fields.map((f) => f.input), typed].filter(Boolean))
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); answer(true); } });
+  box.dataset.category = a.category;
+  entry.steps.append(h("li", { class: "approval-item" }, box)); entry.approvals.set(a.request_id, box);
+  (fields[0]?.input || typed)?.focus();
+  scrollFeed();
+  voice.announce(a, box, answer, fields, typed);
+}
+function resolveApproval(requestId, allowed) {
+  for (const entry of state.runs.values()) {
+    const box = entry.approvals.get(requestId);
+    if (!box) continue;
+    const handoff = box.classList.contains("handoff"), questions = box.dataset.category === "questions";
+    const answered = $$("input.answer", box).some((i) => i.value.trim());
+    const text = questions ? (allowed ? "Answered, starting" : "Stopped") : handoff ? (allowed ? (answered ? "Answered" : "Continued") : "Stopped")
+      : allowed ? "Allowed" : "Denied";
+    box.classList.add("resolved"); $(".row", box).replaceChildren(h("span", { class: allowed ? "outcome good" : "outcome bad" }, text));
+    const reason = $(".reason", box); if (reason) reason.remove();
+    for (const input of $$("input.answer", box)) input.disabled = true;
+    voice.stopListening();
+  }
+}
+function finishRun(entry, result) {
+  const st = result.status || "error";
+  entry.status.className = "status " + st; entry.status.replaceChildren(RUN_TEXT[st] || st);
+  $("header .subtitle", entry.card).textContent = `${result.steps ?? 0} step${result.steps === 1 ? "" : "s"} · ${fmtMs(result.elapsed_ms)}`;
+  if (entry.card.querySelector("footer")) return;
+  const footer = h("footer", {}, h("span", {}, result.message || (result.ok ? "Finished." : "Stopped.")), h("span", { class: "spacer" }));
+  if (result.episode_id !== null && result.episode_id !== undefined) {
+    const up = h("button", { class: "btn ok", type: "button" }, "It worked");
+    const down = h("button", { class: "btn", type: "button" }, "It didn't");
+    const label = async (status) => {
+      up.disabled = down.disabled = true;
+      try { await api("/api/memory/label", { episode_id: result.episode_id, status }); footer.lastChild.replaceWith(h("span", { class: "outcome good" }, "Saved to memory")); }
+      catch (e) { toast(e.message); up.disabled = down.disabled = false; }
+    };
+    up.onclick = () => label("success"); down.onclick = () => label("failed");
+    footer.append(h("span", { class: "muted" }, "Teach memory:"), h("span", { style: "display:flex;gap:6px" }, up, down));
+  }
+  entry.card.append(footer);
+  scrollFeed();
+}
+function renderRun(run) {
+  const entry = runCard(run);
+  entry.steps.replaceChildren();
+  entry.lastStep = undefined;
+  for (const ev of run.events || []) addStep(entry, ev);
+  if (run.result) finishRun(entry, run.result);
+}
+
+/* ---------- running state ---------- */
+function setRunning(on) {
+  state.running = on;
+  $("#send").classList.toggle("hidden", on); $("#stop").classList.toggle("hidden", !on);
+  $("#goal").placeholder = on ? "Working… press Stop (or ⌘.) to interrupt"
+    : state.who === "claude" ? "Talk to Claude: what should we get done?"
+    : 'Tell your Mac what to do… e.g. In Safari, search for "accessibility API"';
+}
+async function resync() {
+  try {
+    const s = await api("/api/state");
+    const all = [...(s.history || [])].reverse();
+    if (s.current && !all.find((r) => r.id === s.current.id)) all.push(s.current);
+    for (const run of all) renderRun(run);
+    const last = [...state.runs.values()].pop();
+    for (const a of s.pending_approvals || []) if (last && !last.approvals.has(a.request_id)) addApproval(last, a);
+    setRunning(s.running);
+  } catch (e) { logLine("state", e.message, "e"); }
+}
+
+/* ---------- events ---------- */
+function connect() {
+  const es = new EventSource(`/api/events?token=${encodeURIComponent(BOOT.token)}`);
+  es.addEventListener("open", () => { logLine("stream", "connected"); resync(); });
+  es.addEventListener("error", () => logLine("stream", "reconnecting…", "w"));
+  es.addEventListener("run_started", (m) => { const { run } = JSON.parse(m.data); runCard(run); setRunning(true); logLine("run", run.goal); scrollFeed(); });
+  es.addEventListener("step", (m) => {
+    const { run_id, event } = JSON.parse(m.data); const entry = state.runs.get(run_id); if (!entry) return;
+    addStep(entry, event);
+    const d = event.decision || {};
+    logLine(event.status, `${event.action || ""}${d.gate_confidence !== undefined ? ` (conf ${Number(d.gate_confidence).toFixed(2)})` : ""}${event.message ? " — " + event.message : ""}`,
+      ["low_confidence", "declined", "stale"].includes(event.status) ? "w" : ["failed", "denied", "blocked"].includes(event.status) ? "e" : "k");
+    scheduleScreen();
+  });
+  es.addEventListener("approval", (m) => { const a = JSON.parse(m.data); const entry = state.runs.get(a.run_id); if (entry) addApproval(entry, a); logLine("approval", `${a.action} — ${a.reason}`, "w"); });
+  es.addEventListener("approval_resolved", (m) => { const a = JSON.parse(m.data); resolveApproval(a.request_id, a.allowed); });
+  es.addEventListener("run_finished", (m) => {
+    const { run_id, result } = JSON.parse(m.data); const entry = state.runs.get(run_id);
+    if (entry) finishRun(entry, result); setRunning(state.pilotBusy); refreshStatus(); scheduleScreen();
+    if (voice.on && !state.pilotBusy) voice.say(`${RUN_TEXT[result.status] || result.status}. ${result.message || ""}`);
+    logLine("finished", `${result.status} after ${result.steps} step(s) ${result.message ? "— " + result.message : ""}`, result.ok ? "k" : "w");
+  });
+  es.addEventListener("run_error", (m) => { const e = JSON.parse(m.data); const entry = state.runs.get(e.run_id);
+    if (entry) entry.card.append(h("div", { class: "note" }, e.message)); logLine("error", e.message, "e"); });
+  es.addEventListener("pilot_text", (m) => { const { delta } = JSON.parse(m.data); claude.text(delta); });
+  es.addEventListener("pilot_tool", (m) => claude.tool(JSON.parse(m.data)));
+  es.addEventListener("pilot_reply", (m) => claude.reply(JSON.parse(m.data).text || ""));
+  es.addEventListener("pilot_error", (m) => claude.error(JSON.parse(m.data).message || "something went wrong"));
+  es.addEventListener("memory_changed", () => { if (state.tab === "memory") refreshMemory(); refreshStatus(); });
+}
+
+/* ---------- side panel ---------- */
+function scheduleScreen() { if (state.tab !== "screen") return; clearTimeout(state.screenTimer); state.screenTimer = setTimeout(refreshScreen, 150); }
+async function refreshScreen() {
+  const box = $("#tab-screen");
+  let o;
+  try { o = await api("/api/observe"); } catch (e) { box.replaceChildren(h("div", { class: "empty" }, e.message)); return; }
+  if (!o.available) { box.replaceChildren(h("div", { class: "empty" }, o.message || "No observation yet.")); return; }
+  const filter = $("#el-filter")?.value || "";
+  const header = h("div", { class: "card" },
+    h("div", { class: "appline" }, h("div", { class: "appicon" }, (o.app.name || "?")[0]),
+      h("div", {}, h("div", { class: "name" }, o.app.name), h("div", { class: "sub" }, `${o.window || "no window"} · ${o.app.bundle_id || ""}`))),
+    h("div", { class: "stats" },
+      h("div", { class: "stat" }, h("b", {}, String(o.elements.length)), h("span", {}, "elements")),
+      h("div", { class: "stat" }, h("b", {}, String(o.menu_items.length)), h("span", {}, "menu commands")),
+      h("div", { class: "stat" }, h("b", {}, fmtMs(o.stats.walk_ms)), h("span", {}, o.stats.simulated ? "walk (simulated)" : "AX walk"))));
+  const search = h("input", { id: "el-filter", class: "search", placeholder: "Filter elements…", value: filter });
+  const list = h("div", {});
+  const draw = () => {
+    const q = search.value.toLowerCase(); list.replaceChildren();
+    const els = o.elements.filter((e) => !q || `${e.label} ${e.role} ${e.value || ""}`.toLowerCase().includes(q));
+    if (!els.length) list.append(h("div", { class: "empty" }, "No matching elements."));
+    for (const e of els) list.append(h("div", { class: "el" }, h("span", { class: "idx" }, String(e.index)),
+      h("div", { class: "lbl" }, h("em", {}, e.role), e.label, e.value ? h("span", { class: "muted" }, ` = ${e.value}`) : null),
+      h("div", { class: "sub" }, (e.ops || []).map((x) => h("span", { class: "chip" }, x)), (e.state || []).map((x) => h("span", { class: "chip st" }, x)),
+        e.in ? h("span", {}, `in ${e.in}`) : null)));
+  };
+  search.addEventListener("input", draw); draw();
+  const menus = h("details", {}, h("summary", { class: "section-title", style: "cursor:pointer" }, `Menu commands (${o.menu_items.length})`),
+    o.menu_items.map((m) => h("div", { class: "el" }, h("span", { class: "idx" }, m.id), h("div", { class: "lbl" }, m.label, m.shortcut ? h("span", { class: "muted" }, `  ${m.shortcut}`) : null))));
+  const text = o.text ? h("details", {}, h("summary", { class: "section-title", style: "cursor:pointer" }, "Visible text"), h("div", { class: "muted", style: "white-space:pre-wrap;font-size:12.5px" }, o.text)) : null;
+  box.replaceChildren(...[header, h("div", { class: "section-title" }, "What Jev sees (interactive elements)"), search, list, menus, text].filter(Boolean));
+}
+async function refreshMemory() {
+  const box = $("#tab-memory");
+  try {
+    const m = await api("/api/memory");
+    if (!m.enabled) { box.replaceChildren(h("div", { class: "empty" }, "Memory is disabled.")); return; }
+    const rows = m.episodes.map((e) => {
+      const mk = (label, status, title) => h("button", { type: "button", title, onclick: async () => {
+        try { await api("/api/memory/label", { episode_id: e.id, status }); toast(`Run #${e.id} marked ${status}`); } catch (err) { toast(err.message); } } }, label);
+      return h("div", { class: "ep" }, h("span", { class: "dot " + e.status }), h("div", { class: "goal" }, e.goal),
+        h("div", { class: "lab" }, mk("✓", "success", "Mark as worked"), mk("✗", "failed", "Mark as failed")),
+        h("div", { class: "when" }, `#${e.id} · ${e.status} · ${e.steps} steps · ${ago(e.started_at)}`));
+    });
+    box.replaceChildren(h("div", { class: "card" }, h("div", { class: "stats" },
+        h("div", { class: "stat" }, h("b", {}, String(m.stats.episodes)), h("span", {}, "runs")),
+        h("div", { class: "stat" }, h("b", {}, String(m.stats.steps)), h("span", {}, "steps")),
+        h("div", { class: "stat" }, h("b", {}, String(m.stats.by_status?.success ?? 0)), h("span", {}, "verified"))),
+      h("div", { class: "muted", style: "font-size:12px;margin-top:10px" }, "Similar past steps come back as hints for Jev. Verified runs count most; mark runs to teach it.")),
+      rows.length ? h("div", {}, rows) : h("div", { class: "empty" }, "No runs yet. Everything the agent does is remembered locally."));
+  } catch (e) { box.replaceChildren(h("div", { class: "empty" }, e.message)); }
+}
+function showTab(name) {
+  state.tab = name;
+  for (const b of $$(".tabs button")) b.classList.toggle("on", b.dataset.tab === name);
+  for (const t of ["screen", "memory", "log"]) $(`#tab-${t}`).classList.toggle("hidden", t !== name);
+  if (name === "screen") refreshScreen(); if (name === "memory") refreshMemory();
+}
+
+/* ---------- composer ---------- */
+function setPolicy(v) { state.policy = v; for (const b of $$("#opt-policy button")) b.classList.toggle("on", b.dataset.v === v); }
+function parseSlots(text) {
+  const slots = {};
+  for (const line of text.split("\n")) { const i = line.indexOf("="); if (i > 0) slots[line.slice(0, i).trim()] = line.slice(i + 1); }
+  return slots;
+}
+async function submit(goalText) {
+  const goal = (goalText ?? $("#goal").value).trim();
+  if (!goal || state.running) return;
+  if (state.who === "claude") return claude.send(goal);
+  const body = {
+    goal, app: $("#opt-app").value, expect_text: $("#opt-expect").value, dry_run: $("#opt-dry").checked,
+    use_memory: $("#opt-memory").checked, min_confidence: Number($("#opt-floor").value), low_confidence_policy: state.policy,
+    slots: parseSlots($("#opt-slots").value),
+  };
+  const steps = parseInt($("#opt-steps").value, 10); if (steps > 0) body.max_steps = steps;
+  try { await api("/api/run", body); $("#goal").value = ""; autosize(); }
+  catch (e) { toast(e.message); logLine("run", e.message, "e"); }
+}
+function autosize() { const g = $("#goal"); g.style.height = "auto"; g.style.height = Math.min(180, g.scrollHeight) + "px"; }
+
+/* ---------- Claude ---------- */
+// The conversation with Claude: your messages, Claude's streamed replies, and chips for what it asked JevOSX to do.
+const TOOL_TEXT = { look_at_screen: "Looking at the screen", recent_runs: "Checking recent runs" };
+const claude = {
+  body: null, bubble: null, chips: new Map(),
+  setWho(who) {
+    state.who = who; try { localStorage.setItem("jevosx-who", who); } catch (_) {}
+    for (const b of $$("#who button")) b.classList.toggle("on", b.dataset.v === who);
+    $("#new-chat").classList.toggle("hidden", who !== "claude");
+    $("#send").textContent = who === "claude" ? "Send" : "Run";
+    setRunning(state.running);
+  },
+  async send(text) {
+    hideWelcome();
+    $("#feed").append(h("div", { class: "you" }, h("div", {}, h("div", { class: "bubble" }, text))));
+    this.body = this.bubble = null; state.pilotBusy = true; setRunning(true); scrollFeed();
+    try { await api("/api/pilot", { text }); $("#goal").value = ""; autosize(); }
+    catch (e) { state.pilotBusy = false; setRunning(false); this.error(e.message); }
+  },
+  row() {  // Claude's current turn in the feed: its words, then chips for what it asked for
+    if (this.body) return this.body;
+    this.body = h("div", { class: "body" }); this.bubble = null;
+    $("#feed").append(h("div", { class: "claude" }, h("span", { class: "avatar", "aria-hidden": "true" }, "C"), this.body));
+    return this.body;
+  },
+  text(delta) {
+    if (!this.bubble) { const row = this.row(); this.bubble = h("div", { class: "bubble" }); row.append(this.bubble); }
+    this.bubble.append(delta); scrollFeed();
+  },
+  tool(t) {
+    if (t.phase === "start") {
+      const label = t.name === "run_task" ? `Asking JevOSX: ${t.input.goal}` : TOOL_TEXT[t.name] || t.name;
+      const chip = h("span", { class: "tool-chip" }, h("span", { class: "spinner" }), label);
+      this.row().append(chip); this.chips.set(t.id, chip); this.bubble = null;
+      if (t.name === "run_task") this.body = null;  // the run card comes next; Claude's next words go below it
+    } else {
+      const chip = this.chips.get(t.id); if (!chip) return;
+      chip.classList.add(t.phase === "done" ? "done" : "failed");
+      chip.querySelector(".spinner")?.remove();
+      chip.prepend(t.phase === "done" ? "✓ " : "✗ ");
+      if (t.summary) chip.append(` · ${t.summary}`);
+    }
+    scrollFeed();
+  },
+  async reply(text) {
+    if (text && !this.bubble && !(this.body && this.body.querySelector(".bubble"))) this.text(text);  // nothing streamed
+    this.body = this.bubble = null; state.pilotBusy = false; setRunning(false);
+    refreshStatus();
+    if (!voice.on || !text) return;
+    await voice.say(text);
+    if (/\?\s*$/.test(text) && Recognition) {  // Claude asked something: listen for the answer
+      const heard = await voice.listen();
+      if (heard) this.send(heard);
+    }
+  },
+  error(message) {
+    this.body = this.bubble = null; state.pilotBusy = false; setRunning(false);
+    $("#feed").append(h("div", { class: "claude error" }, h("span", { class: "avatar", "aria-hidden": "true" }, "C"),
+      h("div", { class: "body" }, h("div", { class: "bubble" }, message))));
+    scrollFeed();
+    if (voice.on) voice.say(message);
+  },
+  async reset() {
+    try { await api("/api/pilot/reset", {}); toast("New conversation with Claude"); this.body = this.bubble = null; } catch (e) { toast(e.message); }
+  },
+};
+
+/* ---------- voice ---------- */
+// Speaking: the Mac's own voice through the console (`say`, the system voice: can be a Siri voice), or the browser's.
+// Listening: the browser's speech recognition (Chrome, Safari). Nothing here runs unless you turn voice on or press
+// the microphone.
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const YES = /^(yes|yeah|yep|sure|ok|okay|go|go ahead|do it|allow|please do|correct)\b/i;
+const NO = /^(no|nope|don'?t|do not|stop|deny|cancel|wait|not now)\b/i;
+const DONE_WORDS = /^(done|finished|continue|ok|okay|i'?m done|go on|carry on)\b/i;
+const SKIP_WORDS = /^(skip|next|no idea|i don'?t know|don'?t know|pass)\b/i;
+function plain(action) {  // 'CLICK [4] button "Publish"' → 'click Publish'
+  const m = /^(\w+)\s+(?:\[\w+\]\s+)?(?:[a-z ]+?\s)?"([^"]+)"/.exec(action || "");
+  if (m) return `${m[1].toLowerCase().replace("_", " ")} ${m[2]}`;
+  return (action || "").replace(/\[[^\]]*\]\s*/g, "").replace(/\s+/g, " ").trim();
+}
+const voice = {
+  on: false, rec: null, serverSpeech: false, onInterim: null,
+  init() {
+    try { this.on = localStorage.getItem("jevosx-voice") === "on"; } catch (_) {}
+    if (!Recognition) { $("#mic").disabled = true; $("#mic").title = "Speaking commands needs Chrome or Safari"; }
+    $("#voice").onclick = () => this.toggle();
+    $("#mic").onclick = () => this.dictateGoal();
+    this.render();
+  },
+  toggle() {
+    this.on = !this.on;
+    try { localStorage.setItem("jevosx-voice", this.on ? "on" : "off"); } catch (_) {}
+    this.render();
+    if (this.on) this.say("Voice is on. Press the microphone and tell me what to do."); else this.stop();
+  },
+  render() { $("#voice").classList.toggle("active", this.on); $("#voice").setAttribute("aria-pressed", String(this.on)); },
+  async say(text) {  // resolves once spoken, so listening starts after, not over it
+    if (!text) return;
+    if (this.serverSpeech) { try { if ((await api("/api/say", { text })).ok) return; } catch (_) {} }
+    if (!window.speechSynthesis) return;
+    await new Promise((resolve) => { const u = new SpeechSynthesisUtterance(text); u.onend = u.onerror = resolve;
+      speechSynthesis.cancel(); speechSynthesis.speak(u); setTimeout(resolve, 20000); });
+  },
+  listen() {  // one utterance → its text ("" when nothing was heard)
+    return new Promise((resolve) => {
+      if (!Recognition) return resolve("");
+      this.stopListening();
+      const rec = new Recognition(); this.rec = rec;
+      rec.lang = navigator.language || "en-US"; rec.interimResults = true; rec.maxAlternatives = 1;
+      let heard = ""; $("#mic").classList.add("listening");
+      rec.onresult = (e) => { heard = [...e.results].map((r) => r[0].transcript).join(" "); this.onInterim?.(heard); };
+      rec.onerror = () => {};  // onend follows
+      rec.onend = () => { $("#mic").classList.remove("listening"); if (this.rec === rec) this.rec = null; resolve(heard.trim()); };
+      try { rec.start(); } catch (_) { $("#mic").classList.remove("listening"); resolve(""); }
+    });
+  },
+  stopListening() { if (this.rec) { try { this.rec.abort(); } catch (_) {} this.rec = null; } $("#mic")?.classList.remove("listening"); },
+  stop() { this.stopListening(); try { speechSynthesis.cancel(); } catch (_) {} },
+  async dictateGoal() {
+    if (!Recognition) return;
+    if (this.rec) return this.stopListening();
+    const goal = $("#goal");
+    this.onInterim = (t) => { goal.value = t; autosize(); };
+    const heard = await this.listen(); this.onInterim = null;
+    if (!heard) return;
+    goal.value = heard; autosize();
+    if (this.on) { if (state.who !== "claude") this.say("On it."); submit(heard); }
+  },
+  async announce(a, box, answer, fields, typed) {  // talk an approval, question or hand-off through
+    if (!this.on) return;
+    const open = () => !box.classList.contains("resolved");
+    if (a.category === "questions") {
+      await this.say("Before I start, a few questions. Say skip to leave one out.");
+      for (const f of fields) {
+        if (!open()) return;
+        await this.say(f.question);
+        this.onInterim = (t) => { f.input.value = t; };
+        const heard = await this.listen(); this.onInterim = null;
+        if (!open()) return;
+        if (NO.test(heard) && /^(stop|cancel)/i.test(heard)) return answer(false);
+        f.input.value = heard && !SKIP_WORDS.test(heard) ? heard : "";
+      }
+      if (open()) { await this.say("Thanks, starting now."); answer(true); }
+      return;
+    }
+    const handoff = a.category === "handoff";
+    const ask = handoff ? `Your turn. ${plain(a.action)} Say done when you are finished, or tell me the answer.`
+      : a.category === "low_confidence" ? `I'm not sure about this one. Should I ${plain(a.action)}? Say yes or no.`
+      : `Should I ${plain(a.action)}? Say yes or no.`;
+    for (let attempt = 0; attempt < 3 && open(); attempt++) {
+      await this.say(attempt ? (handoff ? "Say done, stop, or the answer." : "Sorry, yes or no?") : ask);
+      const heard = await this.listen();
+      if (!open()) return;
+      if (handoff) {
+        if (/^(stop|cancel)\b/i.test(heard)) return answer(false);
+        if (DONE_WORDS.test(heard)) return answer(true);
+        if (heard) { typed.value = heard; return answer(true); }
+      } else {
+        if (YES.test(heard)) return answer(true);
+        if (NO.test(heard)) return answer(false);
+      }
+    }
+  },
+};
+
+/* ---------- boot ---------- */
+function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+function init() {
+  try { applyTheme(localStorage.getItem("jevosx-theme")); } catch (_) {}
+  if (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: light)").matches) applyTheme("light");
+  $("#theme").onclick = () => { const next = document.documentElement.dataset.theme === "light" ? "dark" : "light"; applyTheme(next);
+    try { localStorage.setItem("jevosx-theme", next); } catch (_) {} };
+  const ex = $("#examples");
+  for (const [title, goal] of EXAMPLES) ex.append(h("button", { type: "button", class: "example", onclick: () => submit(goal) }, h("b", {}, title), goal));
+  $("#composer").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+  $("#goal").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); } });
+  $("#goal").addEventListener("input", autosize);
+  $("#stop").onclick = async () => { try { await api("/api/stop", {}); toast("Stopping after the current step…"); } catch (e) { toast(e.message); } };
+  document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "." && state.running) $("#stop").click(); });
+  $("#toggle-options").onclick = () => $("#options").classList.toggle("hidden");
+  voice.init();
+  for (const b of $$("#who button")) b.onclick = () => claude.setWho(b.dataset.v);
+  $("#new-chat").onclick = () => claude.reset();
+  let who = "jev"; try { who = localStorage.getItem("jevosx-who") || "jev"; } catch (_) {}
+  claude.setWho(who === "claude" ? "claude" : "jev");
+  $("#opt-floor").addEventListener("input", (e) => { $("#opt-floor-v").textContent = Number(e.target.value).toFixed(2); state.floor = Number(e.target.value); });
+  for (const b of $$("#opt-policy button")) b.onclick = () => setPolicy(b.dataset.v);
+  for (const b of $$(".tabs button")) b.onclick = () => showTab(b.dataset.tab);
+  refreshStatus().then(() => showTab("screen"));
+  setInterval(refreshStatus, 60000);  // also notices when JevOSX was updated underneath a running console
+  connect();
+  $("#goal").focus();
+}
+init();
+</script>
+</body>
+</html>

@@ -163,7 +163,7 @@ def test_typed_text_that_shows_up_late_in_the_field_counts_as_typed(monkeypatch)
     monkeypatch.setattr(keyboard, "post_chord", lambda chord, delay_s=0: None)
     monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: None)
     executor = object.__new__(MacExecutor)
-    executor.settings = ExecutorSettings(settle_poll_s=0.001, settle_timeout_s=0.5)
+    executor.settings = ExecutorSettings(settle_poll_s=0.001, typed_timeout_s=0.5)
     executor._AXNode = NoFocusAX
     field = element(1, "AXTextField", "Address and search bar", ops=("TYPE_TEXT",), in_web_area=False,
                     node=LateField("AXTextField"))  # fmt: skip
@@ -171,9 +171,36 @@ def test_typed_text_that_shows_up_late_in_the_field_counts_as_typed(monkeypatch)
     executor._frontmost_pid = lambda: obs.app.pid
     result = executor._type(field, "population of Gozo", obs, secret=False, prefer_keys=True)
     assert result.ok and result.method == "keystrokes" and field.node.reads == 3
-    executor.settings = ExecutorSettings(settle_poll_s=0.001, settle_timeout_s=0.01)
+    executor.settings = ExecutorSettings(settle_poll_s=0.001, typed_timeout_s=0.01)
     never = element(2, "AXTextField", "Search", ops=("TYPE_TEXT",), node=FakeNode("AXTextField", Value=""))
     assert not executor._type(never, "Gozo", obs, secret=False, prefer_keys=True).ok  # it never showed up
+
+
+def test_typed_text_gets_seconds_to_show_up_on_a_busy_mac(monkeypatch):
+    """Seen live: with a load average of 6, Chrome's address bar held "facebook.com" only after the 0.8 s read-back
+    had given up; the next observation found it there. The default wait is longer and ends as soon as it shows."""
+    from jevosx.config import ExecutorSettings
+    from jevosx.executor import input as keyboard
+
+    class SlowField(FakeNode):
+        reads = 0
+
+        def get(self, attribute, default=None):
+            if attribute == "AXValue":
+                self.reads += 1
+                return "facebook.com" if self.reads > 25 else ""
+            return super().get(attribute, default)
+
+    monkeypatch.setattr(keyboard, "post_chord", lambda chord, delay_s=0: None)
+    monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: None)
+    executor = object.__new__(MacExecutor)
+    executor.settings = ExecutorSettings()  # the defaults: 25 polls of 0.05 s is 1.25 s
+    executor._AXNode = NoFocusAX
+    field = element(1, "AXTextField", "Address and search bar", ops=("TYPE_TEXT",), in_web_area=False,
+                    node=SlowField("AXTextField"))  # fmt: skip
+    obs = observation([field])
+    executor._frontmost_pid = lambda: obs.app.pid
+    assert executor._type(field, "facebook.com", obs, secret=False, prefer_keys=True).ok
 
 
 @pytest.mark.parametrize("mode", ["auto", "always", "off"])

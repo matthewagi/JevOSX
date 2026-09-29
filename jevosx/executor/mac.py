@@ -292,7 +292,7 @@ class MacExecutor:
             time.sleep(self.settings.settle_poll_s)
             if text in str(node.get("AXValue") or "") or self._replacement_holds(element, pid, text):
                 return True
-            if time.monotonic() - started >= self.settings.settle_timeout_s:
+            if time.monotonic() - started >= self.settings.typed_timeout_s:
                 return False
 
     def _replacement_holds(self, element: UIElement, pid: int | None, text: str) -> bool:

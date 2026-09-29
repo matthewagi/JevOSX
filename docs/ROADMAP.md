@@ -301,7 +301,7 @@ to save and how many before starting.
   Chrome window's address bar reported "typed text did not appear", and only the retry worked (the text was already
   there by then). Focus was fine: the address bar was the focused element before and after. The key events are
   delivered asynchronously, and a probe read "" just after the last key and the full text 30 ms later, which is
-  exactly when the one read-back happened. The read-back now polls (`settle_poll_s`) for up to `settle_timeout_s`.
+  exactly when the one read-back happened. The read-back now polls (`settle_poll_s`) for up to `typed_timeout_s` (2.5 s since 29 Sep: a busy Mac showed typed text after more than 0.8 s).
   The same probe found that reading a text range (AXSelectedTextRange) crashed, because PyObjC returned a plain
   tuple; nothing read ranges yet, and it is fixed.
 - Seen live ("go to facebook marketplace and search for cordless drill", 16:04): Chrome was logged out of Facebook,

@@ -220,7 +220,7 @@ def test_typed_text_is_found_in_the_field_that_replaced_the_observed_one(monkeyp
     monkeypatch.setattr(keyboard, "post_chord", lambda chord, delay_s=0: None)
     monkeypatch.setattr(keyboard, "type_text", lambda text, delay_s=0: replacement.values.update(AXValue=text))
     executor = object.__new__(MacExecutor)
-    executor.settings = ExecutorSettings(settle_timeout_s=0.1, settle_poll_s=0.01)
+    executor.settings = ExecutorSettings(typed_timeout_s=0.1, settle_poll_s=0.01)
     executor._frontmost_pid = lambda: 300
     executor._AXNode = type("AX", (), {"application": staticmethod(lambda pid: app)})
     combobox = element(
@@ -279,7 +279,7 @@ def test_old_text_that_survives_select_all_is_cleared_and_retyped(monkeypatch, s
     monkeypatch.setattr(keyboard, "post_chord", chord)
     monkeypatch.setattr(keyboard, "type_text", type_text)
     executor = object.__new__(MacExecutor)
-    executor.settings = ExecutorSettings(settle_timeout_s=0.05, settle_poll_s=0.001)
+    executor.settings = ExecutorSettings(typed_timeout_s=0.05, settle_poll_s=0.001)
     executor._frontmost_pid = lambda: 300
     combobox = element(
         40, "AXComboBox", "Search Marketplace", kind="text_input", ops=("TYPE_TEXT",), in_web_area=True, node=box,

@@ -85,6 +85,9 @@ class ExecutorSettings:
     typing_mode: str = "auto"  # auto | ax | keys
     pointer_fallback: bool = False  # last-resort synthetic click at the element's AX frame centre
     settle_timeout_s: float = 0.8
+    # How long typed text may take to show in the field. Seen live: with a load average of 6, Chrome's address bar
+    # showed "facebook.com" after more than 0.8 s, the step was reported failed and the agent typed it again.
+    typed_timeout_s: float = 2.5
     settle_poll_s: float = 0.05
     wait_s: float = 0.6
     launch_timeout_s: float = 8.0
